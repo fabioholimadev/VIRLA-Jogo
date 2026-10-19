@@ -1,0 +1,6 @@
+{
+  "name": "VIRLA — Guardiões do Cuidado",
+  "description": "Jogo 2D de plataforma multiplayer sincronizado em tempo real com controle de apresentação estilo Kahoot e aventura educativa VIRLA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
