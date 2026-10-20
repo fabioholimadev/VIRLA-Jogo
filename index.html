@@ -2,7 +2,8 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" type="image/png" href="/logo-virla.png" />
     <title>VIRLA — Guardiões do Cuidado</title>
     <meta name="description" content="Jogo 2D de plataforma multiplayer sincronizado em tempo real com controle de apresentação estilo Kahoot e aventura educativa VIRLA." />
     <meta property="og:title" content="VIRLA — Guardiões do Cuidado" />
@@ -22,14 +23,11 @@
       }
       body {
         font-family: 'Outfit', sans-serif;
-        touch-action: manipulation;
-        user-select: none;
-        -webkit-user-select: none;
         background-color: #4a0052;
       }
     </style>
   </head>
-  <body class="bg-[#4a0052] text-white overflow-hidden select-none">
+  <body class="bg-[#4a0052] text-white min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

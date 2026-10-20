@@ -2,24 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import {
   Heart,
-  Shield,
+  Clock,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Volume2,
-  VolumeX,
-  Clock,
-  Sparkles,
+  Shield,
   Trophy,
-  RotateCw,
-  Users,
-  LogOut,
-  CheckCircle2,
   AlertTriangle,
-  HelpCircle,
-  Edit3,
   Loader2,
-  Lock,
+  Edit3,
+  CheckCircle2,
+  LogOut,
+  Sparkles,
+  Smartphone,
+  X,
 } from 'lucide-react';
 import { GameEngine } from '../game/engine';
 import { LEVELS } from '../game/levels';
@@ -28,6 +24,7 @@ import { sound } from '../game/audio';
 import { SpriteRenderer } from '../game/sprites';
 import { auth, googleAuthProvider } from '../firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { VIRLALogo } from './VIRLALogo';
 
 export interface GoogleUser {
   googleId: string;
@@ -64,7 +61,7 @@ interface PlayerViewProps {
   joinError: string | null;
   sessionReplacedMessage: string | null;
   rankings: any[];
-  onPresenterAuthorized?: (authorized: boolean, idToken: string) => void;
+  onPresenterAuthorized?: (authorized: boolean, idToken: string, isExplicitLogin?: boolean) => void;
 }
 
 // Mini Character Canvas Preview Component
@@ -160,6 +157,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [inGameEnergy, setInGameEnergy] = useState(3);
   const [notification, setNotification] = useState<string | null>(null);
   const [isPortrait, setIsPortrait] = useState(false);
+  const [dismissLandscapeNotice, setDismissLandscapeNotice] = useState(false);
 
   // Multi-Touch Tracking for fluid simultaneous movement & jump
   const activeTouchesRef = useRef<{ [touchId: number]: string }>({});
@@ -219,7 +217,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     }
   }, [notification]);
 
-  // Listen to Firebase Auth state
+  // Passive Firebase Auth state check on mount
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user: FirebaseUser | null) => {
       if (user) {
@@ -239,15 +237,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             setGoogleUser(data.googleUser);
             sessionStorage.setItem('virla_google_user', JSON.stringify(data.googleUser));
 
-            if (data.isHostAuthorized) {
-              onPresenterAuthorized?.(true, token);
-            } else {
-              onPresenterAuthorized?.(false, token);
-            }
+            // Inform App of presenter credentials PASSIVELY without forcing redirect
+            onPresenterAuthorized?.(!!data.isHostAuthorized, token, false);
 
             if (data.presenterClaimPending) {
               setPresenterNotice(
-                'Conta fabiooliveiral2020@gmail.com conectada. A custom claim presenter: true precisa ser atribuída no Firebase Authentication via Admin SDK para liberar o painel do apresentador.'
+                'Conta fabiooliveiral2020@gmail.com conectada. A custom claim presenter: true pode ser atribuída administrativamente.'
               );
             } else {
               setPresenterNotice(null);
@@ -275,7 +270,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         }
       } else {
         setGoogleUser(null);
-        onPresenterAuthorized?.(false, '');
+        onPresenterAuthorized?.(false, '', false);
         setPresenterNotice(null);
         if (!playerId) {
           setCurrentStep('AUTH');
@@ -286,7 +281,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     return () => unsubscribe();
   }, [playerId]);
 
-  // Official Real Google Sign In Handler
+  // Official Real Google Sign In Handler (Explicit user action)
   const handleGoogleSignIn = async () => {
     setIsAuthenticating(true);
     setAuthError(null);
@@ -308,15 +303,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         setGoogleUser(data.googleUser);
         sessionStorage.setItem('virla_google_user', JSON.stringify(data.googleUser));
 
+        // When explicitly logging in, allow initial auto-redirect if presenter
         if (data.isHostAuthorized) {
-          onPresenterAuthorized?.(true, token);
+          onPresenterAuthorized?.(true, token, true);
         } else {
-          onPresenterAuthorized?.(false, token);
+          onPresenterAuthorized?.(false, token, false);
         }
 
         if (data.presenterClaimPending) {
           setPresenterNotice(
-            'Conta fabiooliveiral2020@gmail.com conectada. A custom claim presenter: true precisa ser atribuída no Firebase Authentication via Admin SDK para liberar o painel do apresentador.'
+            'Conta fabiooliveiral2020@gmail.com conectada. O painel do apresentador está liberado para sua conta.'
           );
         } else {
           setPresenterNotice(null);
@@ -356,20 +352,22 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       await signOut(auth);
     } catch {}
     setGoogleUser(null);
-    onPresenterAuthorized?.(false, '');
+    onPresenterAuthorized?.(false, '', false);
     setPresenterNotice(null);
-    sessionStorage.removeItem('virla_google_user');
     setCurrentStep('AUTH');
+    sessionStorage.removeItem('virla_google_user');
   };
 
-  // Profile Save Handler (Step 2 -> Step 3)
+  // Profile Save Submit Handler (Step 2)
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!googleUser) return;
-
-    const cleanName = nicknameInput.trim().substring(0, 16);
-    if (!cleanName || cleanName.length < 2) {
-      setProfileError('Por favor informe um apelido com pelo menos 2 caracteres.');
+    if (!nicknameInput.trim()) {
+      setProfileError('Por favor, informe seu nome de exibição.');
+      return;
+    }
+    if (!googleUser || !idTokenString) {
+      setProfileError('Sessão expirada. Faça login novamente.');
+      setCurrentStep('AUTH');
       return;
     }
 
@@ -377,25 +375,22 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     setProfileError(null);
 
     try {
-      const res = await fetch('/api/profile', {
+      const res = await fetch('/api/profile/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          googleId: googleUser.googleId,
-          nickname: cleanName,
-          characterIndex: selectedSkin,
           idToken: idTokenString,
+          nickname: nicknameInput.trim(),
+          characterIndex: selectedSkin,
         }),
       });
       const data = await res.json();
 
-      if (data.success && data.profile) {
-        setNicknameInput(data.profile.nickname);
-        setSelectedSkin(data.profile.characterIndex);
+      if (data.success) {
         setHasExistingProfile(true);
         setCurrentStep('PIN');
       } else {
-        setProfileError(data.message || 'Erro ao salvar perfil no servidor.');
+        setProfileError(data.message || 'Erro ao salvar o perfil.');
       }
     } catch (err) {
       setProfileError('Falha na comunicação com o servidor ao salvar o perfil.');
@@ -434,16 +429,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       const levelDef = LEVELS[activePhaseId as keyof typeof LEVELS] || LEVELS.fase1;
       const canvas = canvasRef.current;
 
-      const updateCanvasSize = () => {
-        if (!canvas) return;
-        const width = Math.min(window.innerWidth, 1200);
-        const maxH = Math.min(window.innerHeight - 110, 520);
-        canvas.width = width;
-        canvas.height = Math.max(320, maxH);
-      };
-
-      updateCanvasSize();
-      window.addEventListener('resize', updateCanvasSize);
+      // Invariant internal coordinate resolution: exactly 800 x 500
+      // Physics, jump heights, collisions, elderly positions are 100% constant across all devices!
+      const VIRTUAL_WIDTH = 800;
+      const VIRTUAL_HEIGHT = 500;
+      canvas.width = VIRTUAL_WIDTH;
+      canvas.height = VIRTUAL_HEIGHT;
 
       const engine = new GameEngine(canvas, levelDef, characterIndex, {
         onCollectHeart: (heartKey) => {
@@ -482,7 +473,6 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
       return () => {
         clearInterval(uiTimer);
-        window.removeEventListener('resize', updateCanvasSize);
         engine.stop();
         engineRef.current = null;
       };
@@ -538,9 +528,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (sessionReplacedMessage) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto w-full">
-        <div className="bg-[#6B0075] p-6 rounded-3xl border-2 border-amber-400 shadow-2xl">
-          <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400 mx-auto flex items-center justify-center mb-4">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 text-center max-w-md mx-auto w-full overflow-y-auto">
+        <div className="w-full bg-[#6B0075] p-6 rounded-3xl border-2 border-amber-400 shadow-2xl">
+          <div className="w-14 h-14 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400 mx-auto flex items-center justify-center mb-4">
             <AlertTriangle className="w-8 h-8" />
           </div>
           <h2 className="font-shrikhand text-2xl text-white mb-2">Sessão Transferida</h2>
@@ -549,7 +539,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           </p>
           <button
             onClick={() => window.location.reload()}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold border border-white shadow-lg hover:scale-102 transition"
+            className="w-full min-h-[48px] py-3 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold border border-white shadow-lg hover:scale-102 transition cursor-pointer"
           >
             Reconectar nesta Aba
           </button>
@@ -563,36 +553,36 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (!playerId && currentStep === 'AUTH') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-md mx-auto w-full">
-        <div className="w-full bg-[#6B0075] rounded-3xl p-6 sm:p-8 border-2 border-[#FE91FE]/40 shadow-2xl text-center">
-          {/* VIRLA Brand Icon & Heading */}
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#FE91FE] to-[#83078E] flex items-center justify-center mx-auto mb-4 shadow-xl border border-white/30">
-            <Heart className="w-9 h-9 text-white fill-white animate-pulse" />
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full overflow-y-auto">
+        <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-8 border-2 border-[#FE91FE]/40 shadow-2xl text-center my-auto">
+          {/* Official VIRLA Logo */}
+          <div className="flex justify-center mb-4">
+            <VIRLALogo size="lg" />
           </div>
 
           <h1 className="font-shrikhand text-3xl sm:text-4xl text-[#FE91FE] tracking-wide mb-1">
             VIRLA
           </h1>
-          <h2 className="text-sm sm:text-base font-semibold text-white uppercase tracking-wider mb-2">
+          <h2 className="text-xs sm:text-sm font-semibold text-white uppercase tracking-wider mb-2">
             Guardiões do Cuidado
           </h2>
-          <p className="text-xs text-pink-200 uppercase tracking-widest font-medium mb-6">
+          <p className="text-[10px] sm:text-xs text-pink-200 uppercase tracking-widest font-medium mb-5">
             Vida • Inclusão • Respeito • Ligação • Amparo
           </p>
 
           {/* Short Game Presentation */}
-          <div className="bg-[#4A0052]/80 rounded-2xl p-4 border border-pink-400/20 text-left mb-6 space-y-2">
+          <div className="bg-[#4A0052]/80 rounded-2xl p-3.5 sm:p-4 border border-pink-400/20 text-left mb-5 space-y-1.5">
             <p className="text-xs text-pink-100 leading-relaxed font-medium">
               🏃‍♀️ Corra, pule e conecte o cuidado nesta aventura inspirada em clássicos de plataforma!
             </p>
             <p className="text-[11px] text-pink-200/90 leading-relaxed">
-              Ajude o Sr. Jorge e outras pessoas idosas, supere a Desorganização e o Isolamento, e dispute os doces do pódio final na Semana de Tecnologia.
+              Ajude as pessoas idosas, supere a Desorganização e dispute os doces do pódio final na Semana de Tecnologia.
             </p>
           </div>
 
           {/* Presenter Notice Banner */}
           {presenterNotice && (
-            <div className="bg-amber-500/20 border border-amber-400 text-amber-100 text-xs rounded-xl p-3 mb-5 text-left flex items-start gap-2">
+            <div className="bg-amber-500/20 border border-amber-400 text-amber-100 text-xs rounded-xl p-3 mb-4 text-left flex items-start gap-2">
               <Sparkles className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
               <span>{presenterNotice}</span>
             </div>
@@ -600,18 +590,18 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
           {/* Auth Error Banner */}
           {authError && (
-            <div className="bg-red-500/25 border border-red-400 text-red-100 text-xs rounded-xl p-3 mb-5 text-left flex items-start gap-2">
+            <div className="bg-red-500/25 border border-red-400 text-red-100 text-xs rounded-xl p-3 mb-4 text-left flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-red-300 shrink-0 mt-0.5" />
               <span>{authError}</span>
             </div>
           )}
 
-          {/* Official Google Sign In Button */}
+          {/* Official Google Sign In Button - Min Height 48px */}
           <button
             type="button"
             disabled={isAuthenticating}
             onClick={handleGoogleSignIn}
-            className="w-full py-3.5 px-4 rounded-xl bg-white text-gray-800 font-bold text-sm flex items-center justify-center gap-3 shadow-lg hover:bg-gray-50 active:scale-98 transition disabled:opacity-60 cursor-pointer border border-gray-200"
+            className="w-full min-h-[48px] py-3 px-4 rounded-xl bg-white text-gray-800 font-bold text-sm sm:text-base flex items-center justify-center gap-3 shadow-lg hover:bg-gray-50 active:scale-98 transition disabled:opacity-60 cursor-pointer border border-gray-200"
           >
             {isAuthenticating ? (
               <>
@@ -644,7 +634,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           </button>
 
           <p className="text-[10px] text-pink-300 mt-4">
-            Autenticação segura via conta Google. Seu e-mail não será exposto no projetor.
+            Autenticação rápida e segura. Seu e-mail não será exposto no projetor.
           </p>
         </div>
       </div>
@@ -656,19 +646,19 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (!playerId && currentStep === 'PROFILE') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-md mx-auto w-full">
-        <div className="w-full bg-[#6B0075] rounded-3xl p-6 border-2 border-[#FE91FE]/40 shadow-2xl">
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full overflow-y-auto">
+        <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl my-auto">
           {/* Logged in User Bar */}
-          <div className="flex items-center justify-between bg-[#4A0052]/90 p-3 rounded-2xl border border-pink-400/20 mb-5">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center justify-between bg-[#4A0052]/90 p-3 rounded-2xl border border-pink-400/20 mb-4">
+            <div className="flex items-center gap-2.5 min-w-0">
               {googleUser?.picture ? (
                 <img
                   src={googleUser.picture}
                   alt="Avatar"
-                  className="w-9 h-9 rounded-full border border-pink-300 shrink-0"
+                  className="w-8 h-8 rounded-full border border-pink-300 shrink-0"
                 />
               ) : (
-                <div className="w-9 h-9 rounded-full bg-[#83078E] text-white font-bold flex items-center justify-center border border-pink-300 shrink-0">
+                <div className="w-8 h-8 rounded-full bg-[#83078E] text-white font-bold flex items-center justify-center border border-pink-300 shrink-0 text-xs">
                   {googleUser?.name?.charAt(0) || 'G'}
                 </div>
               )}
@@ -683,14 +673,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             <button
               type="button"
               onClick={handleSignOut}
-              className="p-1.5 text-pink-300 hover:text-white transition shrink-0"
+              className="p-1.5 text-pink-300 hover:text-white transition shrink-0 cursor-pointer"
               title="Sair desta conta Google"
             >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="text-center mb-5">
+          <div className="text-center mb-4">
             <h2 className="font-shrikhand text-2xl text-[#FE91FE] tracking-wide">
               {hasExistingProfile ? 'Seu Perfil de Cuidador' : 'Criar seu Perfil'}
             </h2>
@@ -702,16 +692,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           </div>
 
           {profileError && (
-            <div className="bg-red-500/20 border border-red-400 text-red-200 text-xs rounded-xl p-3 mb-4 text-center">
+            <div className="bg-red-500/20 border border-red-400 text-red-200 text-xs rounded-xl p-2.5 mb-4 text-center">
               {profileError}
             </div>
           )}
 
           <form onSubmit={handleSaveProfile} className="space-y-4">
-            {/* Display Name Input */}
+            {/* Display Name Input - Min 48px, text-base prevents iOS zoom */}
             <div>
               <label className="text-[11px] uppercase tracking-wider text-pink-200 font-bold block mb-1">
-                Nome de Exibição no Ranking (visível a todos)
+                Nome de Exibição no Ranking
               </label>
               <div className="relative">
                 <input
@@ -720,7 +710,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                   value={nicknameInput}
                   onChange={(e) => setNicknameInput(e.target.value)}
                   placeholder="Ex: Clara Cuidadora"
-                  className="w-full bg-[#4A0052] border border-[#FE91FE]/40 rounded-xl px-4 py-3 text-white text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#FE91FE]"
+                  className="w-full min-h-[48px] bg-[#4A0052] border border-[#FE91FE]/40 rounded-xl px-4 py-3 text-white text-base font-semibold focus:outline-none focus:ring-2 focus:ring-[#FE91FE]"
                 />
                 <span className="absolute right-3 top-3.5 text-[10px] text-pink-300">
                   {nicknameInput.length}/16
@@ -747,8 +737,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                           : 'border-pink-400/20 bg-[#4A0052]/60 hover:bg-[#4A0052]'
                       }`}
                     >
-                      {/* Character Animated Preview Canvas */}
-                      <MiniCharacterPreview skinIndex={skin.id} size={56} />
+                      <MiniCharacterPreview skinIndex={skin.id} size={50} />
                       <span className="font-bold text-xs text-white mt-1">{skin.name}</span>
                       <span className="text-[9px] text-pink-200 truncate w-full">{skin.title}</span>
                       {isSelected && (
@@ -762,20 +751,20 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               </div>
 
               {/* Selected Character Bio */}
-              <div className="mt-2 p-2.5 rounded-xl bg-[#4A0052]/60 border border-pink-400/20 text-left flex items-center gap-2">
-                <span className="text-xl">{CHARACTER_SKINS[selectedSkin]?.badge}</span>
-                <p className="text-[11px] text-pink-100">
+              <div className="mt-2.5 p-2.5 rounded-xl bg-[#4A0052]/60 border border-pink-400/20 text-left flex items-center gap-2">
+                <span className="text-xl shrink-0">{CHARACTER_SKINS[selectedSkin]?.badge}</span>
+                <p className="text-[11px] text-pink-100 leading-snug">
                   <strong className="text-[#FE91FE]">{CHARACTER_SKINS[selectedSkin]?.name}:</strong>{' '}
                   {CHARACTER_SKINS[selectedSkin]?.description}
                 </p>
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit Button - Min Height 48px */}
             <button
               type="submit"
               disabled={isSavingProfile || !nicknameInput.trim()}
-              className="w-full mt-2 py-3.5 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold text-sm border border-white/60 shadow-lg hover:scale-102 active:scale-98 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] py-3 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold text-base border border-white/60 shadow-lg hover:scale-102 active:scale-98 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
             >
               {isSavingProfile ? (
                 <>
@@ -797,18 +786,18 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (!playerId && currentStep === 'PIN') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-md mx-auto w-full">
-        <div className="w-full bg-[#6B0075] rounded-3xl p-6 border-2 border-[#FE91FE]/40 shadow-2xl">
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full overflow-y-auto">
+        <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl my-auto">
           {/* Confirmed Player Card */}
-          <div className="flex items-center justify-between bg-[#4A0052] p-3.5 rounded-2xl border border-pink-400/30 mb-5 shadow">
-            <div className="flex items-center gap-3">
-              <MiniCharacterPreview skinIndex={selectedSkin} size={48} />
+          <div className="flex items-center justify-between bg-[#4A0052] p-3 rounded-2xl border border-pink-400/30 mb-4 shadow">
+            <div className="flex items-center gap-2.5">
+              <MiniCharacterPreview skinIndex={selectedSkin} size={44} />
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-pink-300 font-bold block">
+                <span className="text-[9px] uppercase tracking-wider text-pink-300 font-bold block">
                   Jogador Confirmado
                 </span>
-                <span className="font-bold text-base text-white">{nicknameInput}</span>
-                <span className="text-xs text-[#FE91FE] block font-medium">
+                <span className="font-bold text-sm sm:text-base text-white">{nicknameInput}</span>
+                <span className="text-[11px] text-[#FE91FE] block font-medium">
                   {CHARACTER_SKINS[selectedSkin]?.name} ({CHARACTER_SKINS[selectedSkin]?.title})
                 </span>
               </div>
@@ -816,7 +805,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             <button
               type="button"
               onClick={() => setCurrentStep('PROFILE')}
-              className="px-2.5 py-1.5 rounded-lg bg-[#83078E] hover:bg-[#83078E]/80 text-[#FE91FE] text-xs font-semibold flex items-center gap-1 border border-pink-400/30 transition"
+              className="min-h-[36px] px-2.5 py-1.5 rounded-lg bg-[#83078E] hover:bg-[#83078E]/80 text-[#FE91FE] text-xs font-semibold flex items-center gap-1 border border-pink-400/30 transition cursor-pointer"
               title="Editar Perfil"
             >
               <Edit3 className="w-3.5 h-3.5" />
@@ -824,7 +813,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             </button>
           </div>
 
-          <div className="text-center mb-5">
+          <div className="text-center mb-4">
             <h2 className="font-shrikhand text-2xl text-[#FE91FE] tracking-wide">
               Entrar na Competição
             </h2>
@@ -835,7 +824,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
           {/* Join Error Notice */}
           {joinError && (
-            <div className="bg-red-500/25 border border-red-400 text-red-100 text-xs rounded-xl p-3 mb-4 text-center">
+            <div className="bg-red-500/25 border border-red-400 text-red-100 text-xs rounded-xl p-2.5 mb-4 text-center">
               {joinError}
             </div>
           )}
@@ -853,7 +842,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                 value={pinInput}
                 onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
                 placeholder="Ex: 849201"
-                className="w-full bg-[#4A0052] border-2 border-[#FE91FE]/50 rounded-xl px-4 py-3.5 text-center text-white text-2xl font-mono tracking-widest font-black focus:outline-none focus:ring-2 focus:ring-[#FE91FE]"
+                className="w-full min-h-[52px] bg-[#4A0052] border-2 border-[#FE91FE]/50 rounded-xl px-4 py-3 text-center text-white text-2xl sm:text-3xl font-mono tracking-widest font-black focus:outline-none focus:ring-2 focus:ring-[#FE91FE]"
                 autoFocus
               />
             </div>
@@ -861,7 +850,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             <button
               type="submit"
               disabled={isJoining || pinInput.length < 4}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold text-base border border-white/60 shadow-lg hover:scale-102 active:scale-98 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] py-3 rounded-xl bg-gradient-to-r from-[#FE91FE] to-[#83078E] text-white font-bold text-base border border-white/60 shadow-lg hover:scale-102 active:scale-98 transition disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
             >
               {isJoining ? (
                 <>
@@ -887,8 +876,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (playerId && roomState === 'LOBBY') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-md mx-auto w-full text-center">
-        <div className="w-full bg-[#6B0075] rounded-3xl p-6 sm:p-8 border-2 border-[#FE91FE]/40 shadow-2xl space-y-5">
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full text-center overflow-y-auto">
+        <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-8 border-2 border-[#FE91FE]/40 shadow-2xl space-y-4 my-auto">
           {/* Room PIN Badge */}
           <div className="inline-flex items-center gap-2 bg-[#4A0052] px-4 py-1.5 rounded-full border border-pink-400/40 text-xs font-mono text-pink-200">
             <span>SALA:</span>
@@ -897,8 +886,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
 
           {/* Player Identity Confirmation */}
           <div className="flex flex-col items-center">
-            <div className="w-20 h-20 rounded-2xl bg-[#4A0052] flex items-center justify-center border-2 border-[#FE91FE] shadow-lg mb-2">
-              <MiniCharacterPreview skinIndex={characterIndex} size={72} />
+            <div className="w-18 h-18 sm:w-20 sm:h-20 rounded-2xl bg-[#4A0052] flex items-center justify-center border-2 border-[#FE91FE] shadow-lg mb-2">
+              <MiniCharacterPreview skinIndex={characterIndex} size={68} />
             </div>
             <h2 className="font-shrikhand text-2xl text-white">
               Olá, {nickname}!
@@ -909,7 +898,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           </div>
 
           {/* Sync Waiting Message */}
-          <div className="p-4 rounded-2xl bg-[#4A0052]/90 border border-amber-400/50 text-amber-200 text-xs space-y-1">
+          <div className="p-3.5 rounded-2xl bg-[#4A0052]/90 border border-amber-400/50 text-amber-200 text-xs space-y-1">
             <div className="flex items-center justify-center gap-2 font-bold text-white text-sm">
               <Clock className="w-4 h-4 text-amber-300 animate-spin" />
               <span>Aguardando o Apresentador...</span>
@@ -920,9 +909,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           </div>
 
           {/* Rotating VIRLA Educational Cards */}
-          <div className="p-4 rounded-2xl bg-[#4A0052]/50 border border-pink-400/20 text-left min-h-[90px] flex flex-col justify-center">
+          <div className="p-3.5 rounded-2xl bg-[#4A0052]/50 border border-pink-400/20 text-left min-h-[85px] flex flex-col justify-center">
             <div className="flex items-center gap-1.5 text-xs font-bold text-[#FE91FE] uppercase tracking-wider mb-1">
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
               <span>Valores VIRLA: {VIRLA_VALUES[valueCardIndex].title}</span>
             </div>
             <p className="text-xs text-pink-100 leading-relaxed">
@@ -944,8 +933,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <span className="text-xs uppercase tracking-widest text-[#FE91FE] font-bold block mb-2">
             Prepare-se!
           </span>
-          <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-[#FE91FE] to-[#83078E] border-4 border-white flex items-center justify-center shadow-2xl">
-            <span className="font-shrikhand text-7xl text-white">
+          <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-3xl bg-gradient-to-br from-[#FE91FE] to-[#83078E] border-4 border-white flex items-center justify-center shadow-2xl mx-auto">
+            <span className="font-shrikhand text-5xl sm:text-7xl text-white">
               {countdown > 0 ? countdown : 'VAI!'}
             </span>
           </div>
@@ -965,13 +954,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const isTop3 = myRank >= 1 && myRank <= 3;
 
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 max-w-lg mx-auto w-full text-center">
-        <div className="w-full bg-[#6B0075] rounded-3xl p-6 border-2 border-[#FE91FE]/40 shadow-2xl space-y-4">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center mx-auto shadow-lg border-2 border-white">
-            <Trophy className="w-8 h-8 text-white" />
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-lg mx-auto w-full text-center overflow-y-auto">
+        <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl space-y-4 my-auto">
+          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center mx-auto shadow-lg border-2 border-white">
+            <Trophy className="w-7 h-7 text-white" />
           </div>
 
-          <h2 className="font-shrikhand text-3xl text-white">Classificação Final</h2>
+          <h2 className="font-shrikhand text-2xl sm:text-3xl text-white">Classificação Final</h2>
 
           {/* Player Personal Result Card */}
           <div
@@ -981,10 +970,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                 : 'bg-[#4A0052] border-pink-400/30'
             }`}
           >
-            <div className="text-xs uppercase tracking-wider text-pink-200 font-bold mb-1">
+            <div className="text-[10px] sm:text-xs uppercase tracking-wider text-pink-200 font-bold mb-1">
               Seu Desempenho
             </div>
-            <div className="text-2xl font-bold text-white flex items-center justify-center gap-2">
+            <div className="text-xl sm:text-2xl font-bold text-white flex items-center justify-center gap-2">
               <span>{myRank > 0 ? `${myRank}º Lugar` : 'Participante'}</span>
               {isTop3 && <span className="text-xl">🍬</span>}
             </div>
@@ -996,15 +985,15 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-pink-400/20 text-xs">
               <div>
                 <span className="text-[10px] text-pink-300 block">Pontuação</span>
-                <strong className="text-[#FE91FE] text-base">{score}</strong>
+                <strong className="text-[#FE91FE] text-sm sm:text-base">{score}</strong>
               </div>
               <div>
-                <span className="text-[10px] text-pink-300 block">Idosos Ajudados</span>
-                <strong className="text-white text-base">{rescuedCount}</strong>
+                <span className="text-[10px] text-pink-300 block">Idosos</span>
+                <strong className="text-white text-sm sm:text-base">{rescuedCount}</strong>
               </div>
               <div>
                 <span className="text-[10px] text-pink-300 block">Recuperações</span>
-                <strong className="text-pink-200 text-base">{recoveries}</strong>
+                <strong className="text-pink-200 text-sm sm:text-base">{recoveries}</strong>
               </div>
             </div>
           </div>
@@ -1024,11 +1013,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
                       : 'bg-[#6B0075]/60 text-white'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
                     <span className="w-5 text-center font-bold">
                       {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
                     </span>
-                    <span className="truncate max-w-[140px]">{p.nickname}</span>
+                    <span className="truncate max-w-[120px] sm:max-w-[160px]">{p.nickname}</span>
                   </div>
                   <div className="flex items-center gap-2 text-[11px]">
                     <span className="text-pink-200">👵 {p.rescuedCount}</span>
@@ -1047,19 +1036,19 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // STEP 5: ACTIVE GAMEPLAY & MOBILE HUD
   // -------------------------------------------------------------
   return (
-    <div className="flex-1 flex flex-col justify-between w-full h-full relative overflow-hidden select-none touch-none">
+    <div className="flex-1 flex flex-col justify-between w-full h-full relative overflow-hidden select-none touch-none overscroll-none">
       {/* Top Mobile HUD Bar */}
-      <div className="w-full bg-[#6B0075]/90 backdrop-blur-md border-b border-[#FE91FE]/30 px-3 py-2 flex items-center justify-between text-xs shrink-0 z-30">
-        {/* Left: Player Profile & Energy Hearts */}
-        <div className="flex items-center gap-2">
+      <div className="w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-2.5 sm:px-4 py-1.5 flex items-center justify-between text-xs shrink-0 z-30">
+        {/* Left: Player Nickname & Energy Hearts */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <div className="flex items-center gap-1 bg-[#4A0052] px-2 py-1 rounded-lg border border-pink-400/30">
-            <span className="font-bold text-white truncate max-w-[90px]">{nickname}</span>
+            <span className="font-bold text-white truncate max-w-[75px] sm:max-w-[120px]">{nickname}</span>
           </div>
           <div className="flex items-center gap-0.5">
             {[1, 2, 3].map((heartIndex) => (
               <Heart
                 key={heartIndex}
-                className={`w-4 h-4 transition ${
+                className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition ${
                   heartIndex <= inGameEnergy
                     ? 'text-pink-400 fill-pink-400 drop-shadow'
                     : 'text-gray-500 fill-gray-500/30'
@@ -1070,43 +1059,58 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         </div>
 
         {/* Center: Remaining Timer */}
-        <div className="flex items-center gap-1.5 bg-[#4A0052] px-3 py-1 rounded-lg border border-pink-400/40 text-amber-300 font-mono font-bold">
+        <div className="flex items-center gap-1 bg-[#4A0052] px-2.5 sm:px-3 py-1 rounded-lg border border-pink-400/40 text-amber-300 font-mono font-bold">
           <Clock className="w-3.5 h-3.5" />
           <span>{timeRemaining}s</span>
         </div>
 
         {/* Right: Rescues & Total Score */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           <div className="flex items-center gap-1 bg-[#4A0052] px-2 py-1 rounded-lg border border-pink-400/30 text-white font-semibold">
             <span>👵</span>
             <span>{rescuedCount}</span>
           </div>
-          <div className="bg-[#83078E] px-2.5 py-1 rounded-lg border border-[#FE91FE]/40 text-[#FE91FE] font-bold">
+          <div className="bg-[#83078E] px-2 sm:px-2.5 py-1 rounded-lg border border-[#FE91FE]/40 text-[#FE91FE] font-bold">
             {score} pts
           </div>
         </div>
       </div>
 
-      {/* Floating In-Game Toast */}
+      {/* Floating In-Game Notification */}
       {notification && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 bg-[#83078E]/95 border-2 border-[#FE91FE] text-white text-xs font-bold px-4 py-2 rounded-2xl shadow-2xl animate-fade-in flex items-center gap-2 max-w-[90%] text-center">
+        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 bg-[#83078E]/95 border-2 border-[#FE91FE] text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-2xl animate-fade-in flex items-center gap-1.5 max-w-[90%] text-center">
           <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
           <span>{notification}</span>
         </div>
       )}
 
-      {/* Main Canvas Viewport */}
-      <div className="flex-1 flex items-center justify-center relative overflow-hidden bg-[#2D0033]">
+      {/* Portrait Suggestion Floating Hint (Non-blocking) */}
+      {isPortrait && !dismissLandscapeNotice && (
+        <div className="absolute top-12 right-2 z-40 bg-[#3B0042]/90 border border-pink-400/40 text-pink-200 text-[10px] px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1.5 animate-pulse">
+          <Smartphone className="w-3 h-3 text-amber-300 rotate-90" />
+          <span>Dica: Modo paisagem expande a visão</span>
+          <button
+            type="button"
+            onClick={() => setDismissLandscapeNotice(true)}
+            className="text-pink-300 hover:text-white ml-1 p-0.5"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Main Game Viewport - Canvas Preserves Invariant 800x500 Aspect Ratio */}
+      <div className="flex-1 flex items-center justify-center relative overflow-hidden bg-[#2D0033] p-1">
         <canvas
           ref={canvasRef}
-          className="max-w-full max-h-full object-contain shadow-2xl block"
+          className="w-full max-w-full h-auto max-h-full object-contain shadow-2xl block touch-none select-none"
         />
 
         {/* Phase Finished Overlay */}
         {phaseFinished && (
           <div className="absolute inset-0 bg-[#4A0052]/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30">
-            <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-300 border-2 border-emerald-400 flex items-center justify-center mb-3">
-              <CheckCircle2 className="w-10 h-10" />
+            <div className="w-14 h-14 rounded-full bg-emerald-500/20 text-emerald-300 border-2 border-emerald-400 flex items-center justify-center mb-2">
+              <CheckCircle2 className="w-9 h-9" />
             </div>
             <h3 className="font-shrikhand text-2xl text-white mb-1">
               Fase Concluída!
@@ -1115,7 +1119,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               Você acolheu os idosos e alcançou o ponto seguro!
             </p>
             {timeBonus > 0 && (
-              <span className="text-sm font-bold text-amber-300 mb-3">
+              <span className="text-sm font-bold text-amber-300 mb-2">
                 Bônus de tempo: +{timeBonus} pts
               </span>
             )}
@@ -1126,10 +1130,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         )}
       </div>
 
-      {/* Mobile Touch Controls - Multi-Touch enabled */}
-      <div className="w-full bg-[#3B0042]/95 border-t border-pink-400/20 p-2 sm:p-3 pb-safe z-30 flex items-center justify-between shrink-0">
+      {/* Mobile Touch Controls - Multi-Touch Enabled, Sized >= 56px, Safe Area Respected */}
+      <div className="w-full bg-[#3B0042]/95 border-t border-pink-400/25 p-2 sm:p-3 pb-safe z-30 flex items-center justify-between shrink-0 select-none touch-none">
         {/* Left Directional Cluster */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button
             type="button"
             onTouchStart={(e) => handleTouchStart('ArrowLeft', e)}
@@ -1143,11 +1147,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowLeft', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowLeft']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
                 : 'bg-[#6B0075] text-white border-pink-400/40'
             }`}
+            aria-label="Mover para esquerda"
           >
             <ArrowLeft className="w-8 h-8" />
           </button>
@@ -1165,18 +1170,19 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowRight', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowRight']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
                 : 'bg-[#6B0075] text-white border-pink-400/40'
             }`}
+            aria-label="Mover para direita"
           >
             <ArrowRight className="w-8 h-8" />
           </button>
         </div>
 
         {/* Right Action & Jump Cluster */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
           {/* Contextual Action / Shield Button */}
           <button
             type="button"
@@ -1191,14 +1197,15 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('KeyE', false);
             }}
-            className={`h-14 sm:h-16 px-4 rounded-2xl flex items-center justify-center gap-1.5 border-2 shadow-lg font-bold text-xs uppercase tracking-wider transition active:scale-95 ${
+            className={`min-h-[56px] h-14 sm:h-16 px-3.5 sm:px-4 rounded-2xl flex items-center justify-center gap-1.5 border-2 shadow-lg font-bold text-xs uppercase tracking-wider transition active:scale-95 cursor-pointer touch-none select-none ${
               contextualBtn.isContextual
                 ? 'bg-amber-400 text-amber-950 border-white animate-pulse'
                 : 'bg-[#83078E] text-[#FE91FE] border-pink-400/40'
             }`}
+            aria-label={contextualBtn.label}
           >
             <Shield className="w-5 h-5 shrink-0" />
-            <span>{contextualBtn.label}</span>
+            <span className="truncate max-w-[85px] sm:max-w-none">{contextualBtn.label}</span>
           </button>
 
           {/* Jump Button */}
@@ -1215,11 +1222,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowUp', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center border-2 shadow-lg font-bold transition active:scale-95 ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center border-2 shadow-lg font-bold transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowUp']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
                 : 'bg-gradient-to-br from-[#FE91FE] to-[#83078E] text-white border-white/60'
             }`}
+            aria-label="Pular"
           >
             <ArrowUp className="w-7 h-7" />
             <span className="text-[9px] uppercase tracking-wider leading-none">Pular</span>

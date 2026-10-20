@@ -3,9 +3,9 @@ import { VIRLAHeader } from './components/VIRLAHeader';
 import { HostView } from './components/HostView';
 import { PlayerView, GoogleUser } from './components/PlayerView';
 import { sound } from './game/audio';
-import { Monitor } from 'lucide-react';
+import { Monitor, Sparkles } from 'lucide-react';
 import { auth } from './firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
 
 export default function App() {
   const [mode, setMode] = useState<'host' | 'player'>('player');
@@ -19,6 +19,11 @@ export default function App() {
   // Presenter Authorization State (Server-verified Firebase Custom Claim)
   const [isHostAuthorized, setIsHostAuthorized] = useState<boolean>(false);
   const [hostIdToken, setHostIdToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+
+  // Navigation guard flags: prevent repeated automatic redirect loops
+  const hasAutoRedirectedHostRef = useRef<boolean>(false);
+  const userManuallySwitchedToPlayerRef = useRef<boolean>(false);
 
   // Host state
   const [hostPin, setHostPin] = useState<string | null>(null);
@@ -74,6 +79,7 @@ export default function App() {
   // Listen to Firebase Auth state for server-side verified presenter authorization
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
       if (user) {
         try {
           const token = await user.getIdToken();
@@ -88,7 +94,12 @@ export default function App() {
 
           if (data.success && data.authorized) {
             setIsHostAuthorized(true);
-            setMode('host');
+            // Automatic redirect to host panel happens ONLY ONCE upon initial login/load
+            // If the user already manually navigated back to the player view, do NOT force them back!
+            if (!hasAutoRedirectedHostRef.current && !userManuallySwitchedToPlayerRef.current) {
+              hasAutoRedirectedHostRef.current = true;
+              setMode('host');
+            }
           } else {
             setIsHostAuthorized(false);
           }
@@ -98,6 +109,8 @@ export default function App() {
       } else {
         setIsHostAuthorized(false);
         setHostIdToken(null);
+        hasAutoRedirectedHostRef.current = false;
+        userManuallySwitchedToPlayerRef.current = false;
         setMode('player');
       }
     });
@@ -307,12 +320,53 @@ export default function App() {
     }
   };
 
-  const handlePresenterAuthorized = (authorized: boolean, idToken: string) => {
+  /**
+   * Presenter authorization callback from PlayerView or login.
+   * isExplicitLogin: only set to true when the user explicitly clicks the Google sign-in button
+   * on that turn, NOT during passive auth checks on mount.
+   */
+  const handlePresenterAuthorized = (authorized: boolean, idToken: string, isExplicitLogin = false) => {
     setIsHostAuthorized(authorized);
     setHostIdToken(idToken);
-    if (authorized) {
+    if (authorized && isExplicitLogin && !userManuallySwitchedToPlayerRef.current) {
+      hasAutoRedirectedHostRef.current = true;
       setMode('host');
     }
+  };
+
+  /**
+   * Safe navigation out of host view ("Voltar").
+   * Returns to player/home screen without closing the room or logging out.
+   */
+  const handleExitHost = () => {
+    userManuallySwitchedToPlayerRef.current = true;
+    setMode('player');
+  };
+
+  /**
+   * Explicit navigation to Host/Telão panel.
+   */
+  const handleOpenHost = () => {
+    userManuallySwitchedToPlayerRef.current = false;
+    setMode('host');
+  };
+
+  /**
+   * Explicit sign out action - separate from "Voltar".
+   */
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Error signing out:', err);
+    }
+    setIsHostAuthorized(false);
+    setHostIdToken(null);
+    setCurrentUser(null);
+    hasAutoRedirectedHostRef.current = false;
+    userManuallySwitchedToPlayerRef.current = false;
+    setMode('player');
+    sessionStorage.removeItem('virla_google_user');
   };
 
   // Host Actions
@@ -359,26 +413,50 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-[#4A0052] text-white">
+    <div className="min-h-screen w-full flex flex-col bg-[#4A0052] text-white overflow-x-hidden">
       {/* Brand Header */}
       <VIRLAHeader
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         mode={mode}
-        onExitHost={() => setMode('player')}
+        onExitHost={handleExitHost}
         isHostAuthorized={isHostAuthorized}
-        onOpenHost={() => setMode('host')}
+        onOpenHost={handleOpenHost}
+        onSignOut={handleSignOut}
+        isAuthenticated={!!currentUser}
+        roomPin={hostPin}
       />
 
       {/* Reconnecting Banner */}
       {reconnecting && (
-        <div className="bg-amber-600/90 text-white text-xs font-bold py-1 px-4 text-center border-b border-amber-400 animate-pulse">
+        <div className="bg-amber-600/95 text-white text-xs font-bold py-1.5 px-4 text-center border-b border-amber-400 animate-pulse z-30">
           Reconectando ao servidor em tempo real...
         </div>
       )}
 
-      {/* Main Screen according to Mode */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
+      {/* Presenter in Participant View Quick Banner */}
+      {mode === 'player' && isHostAuthorized && (
+        <div className="bg-gradient-to-r from-amber-500/20 via-[#83078E]/40 to-amber-500/20 border-b border-amber-400/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200 z-30">
+          <div className="flex items-center gap-2">
+            <span className="text-base">👑</span>
+            <span>
+              Logado como <b>Apresentador Oficial</b>
+              {hostPin ? ` (Sala ${hostPin} em andamento)` : ''}.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleOpenHost}
+            className="min-h-[36px] px-3 py-1 bg-amber-400 hover:bg-amber-300 text-amber-950 font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow"
+          >
+            <Monitor className="w-3.5 h-3.5" />
+            <span>Retornar ao Painel do Apresentador</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main View Area */}
+      <main className="flex-1 flex flex-col overflow-y-auto relative min-h-0">
         {mode === 'host' && isHostAuthorized ? (
           <HostView
             socket={socketRef.current}
@@ -390,6 +468,7 @@ export default function App() {
             onToggleLock={handleToggleLock}
             onEndPhase={handleEndPhase}
             onKickPlayer={handleKickPlayer}
+            onExitHost={handleExitHost}
             roomState={roomState}
             timeRemaining={timeRemaining}
             isPaused={isPaused}
@@ -424,19 +503,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* Discreet Footer link for Presenter (Only shown if authenticated & authorized) */}
-      {mode === 'player' && isHostAuthorized && (
-        <div className="py-1 px-4 bg-[#3B0042] border-t border-pink-400/20 text-center">
-          <button
-            onClick={() => setMode('host')}
-            className="text-[10px] text-amber-300 hover:text-amber-200 font-semibold tracking-wider uppercase inline-flex items-center gap-1 transition cursor-pointer"
-          >
-            <Monitor className="w-3 h-3" />
-            <span>Abrir Painel do Apresentador (Telão)</span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
