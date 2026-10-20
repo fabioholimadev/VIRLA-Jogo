@@ -209,7 +209,7 @@ export const HostView: React.FC<HostViewProps> = ({
   // --- 1. LOBBY SCREEN (Waiting for participants) ---
   if (roomState === 'LOBBY') {
     return (
-      <div className="flex-1 flex flex-col p-3 sm:p-6 max-w-7xl mx-auto w-full overflow-y-auto">
+      <div className="host-view-layout flex-1 flex flex-col p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full overflow-y-auto overflow-x-hidden">
         {/* Top bar with PIN and instructions */}
         <div className="bg-[#6B0075]/90 rounded-3xl p-4 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl flex flex-col lg:flex-row items-center justify-between gap-5 mb-5">
           <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 text-center sm:text-left w-full lg:w-auto">
@@ -390,7 +390,7 @@ export const HostView: React.FC<HostViewProps> = ({
   // --- 2. COUNTDOWN OVERLAY ---
   if (roomState === 'COUNTDOWN') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+      <div className="host-view-layout flex-1 flex flex-col items-center justify-center p-6 text-center">
         <h2 className="text-2xl sm:text-3xl text-pink-200 font-bold mb-4 uppercase tracking-widest">
           A partida vai começar em:
         </h2>
@@ -418,159 +418,159 @@ export const HostView: React.FC<HostViewProps> = ({
         : 'Fase 3 — Praça das Conexões';
 
     return (
-      <div className="flex-1 flex flex-col p-3 sm:p-6 max-w-7xl mx-auto w-full overflow-y-auto">
-        {/* Header HUD with Phase, Timer, and Controls */}
-        <div className="bg-[#6B0075] p-4 sm:p-5 rounded-3xl border-2 border-[#FE91FE]/40 shadow-xl flex flex-wrap items-center justify-between gap-4 mb-5">
-          <div>
-            <span className="text-[10px] sm:text-xs uppercase font-bold tracking-widest text-[#FE91FE] bg-[#4A0052] px-3 py-1 rounded-full border border-pink-400/30">
-              {roomState === 'TUTORIAL' ? 'Treinamento' : 'Em Andamento'}
-            </span>
-            <h1 className="font-shrikhand text-xl sm:text-3xl text-white mt-1">{phaseTitle}</h1>
-          </div>
+      <div className="host-view-layout flex-1 flex flex-col p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full overflow-y-auto overflow-x-hidden">
+        {/* Responsive CSS Grid organizing control cards and live ranking */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 w-full">
+          {/* Top HUD Card: Full width (1 col on mobile, 12 cols on desktop) */}
+          <div className="lg:col-span-12 bg-[#6B0075] p-3.5 sm:p-5 rounded-3xl border-2 border-[#FE91FE]/40 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+            <div className="text-center sm:text-left">
+              <span className="text-[10px] sm:text-xs uppercase font-bold tracking-widest text-[#FE91FE] bg-[#4A0052] px-3 py-1 rounded-full border border-pink-400/30">
+                {roomState === 'TUTORIAL' ? 'Treinamento' : 'Em Andamento'}
+              </span>
+              <h1 className="font-shrikhand text-lg sm:text-2xl lg:text-3xl text-white mt-1 leading-tight">{phaseTitle}</h1>
+            </div>
 
-          {/* Time Remaining Clock */}
-          <div className="flex items-center gap-3 bg-[#4A0052] px-4 sm:px-6 py-2 sm:py-3 rounded-2xl border border-[#FE91FE]/50 shadow-inner">
-            <div className="text-center">
-              <span className="text-[9px] sm:text-[10px] text-pink-300 uppercase tracking-widest font-bold block">Tempo</span>
-              <div
-                className={`text-2xl sm:text-4xl font-bold font-mono ${
-                  timeRemaining <= 10 ? 'text-red-400 animate-pulse' : 'text-[#FE91FE]'
+            {/* Time Remaining Clock */}
+            <div className="flex items-center gap-3 bg-[#4A0052] px-4 sm:px-6 py-2 sm:py-2.5 rounded-2xl border border-[#FE91FE]/50 shadow-inner">
+              <div className="text-center">
+                <span className="text-[9px] sm:text-[10px] text-pink-300 uppercase tracking-widest font-bold block">Tempo Restante</span>
+                <div
+                  className={`text-2xl sm:text-4xl font-bold font-mono ${
+                    timeRemaining <= 10 ? 'text-red-400 animate-pulse' : 'text-[#FE91FE]'
+                  }`}
+                >
+                  {Math.floor(timeRemaining / 60)}:
+                  {String(timeRemaining % 60).padStart(2, '0')}
+                </div>
+              </div>
+            </div>
+
+            {/* Controls - Separated buttons with min-h 48px to prevent accidental taps */}
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <button
+                onClick={onTogglePause}
+                className={`flex-1 sm:flex-none min-h-[48px] px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border transition cursor-pointer text-xs sm:text-sm ${
+                  isPaused
+                    ? 'bg-amber-500 text-white border-amber-300 animate-pulse'
+                    : 'bg-[#83078E] text-pink-100 border-[#FE91FE]/40 hover:bg-[#83078E]/80'
                 }`}
               >
-                {Math.floor(timeRemaining / 60)}:
-                {String(timeRemaining % 60).padStart(2, '0')}
+                {isPaused ? <Play className="w-4 h-4 sm:w-5 sm:h-5" /> : <Pause className="w-4 h-4 sm:w-5 sm:h-5" />}
+                <span>{isPaused ? 'Continuar' : 'Pausar'}</span>
+              </button>
+
+              <button
+                onClick={onEndPhase}
+                className="flex-1 sm:flex-none min-h-[48px] px-4 py-2.5 rounded-xl bg-pink-600/40 hover:bg-pink-600/60 text-[#FE91FE] font-bold border border-[#FE91FE]/60 transition flex items-center justify-center gap-2 cursor-pointer text-xs sm:text-sm"
+              >
+                <FastForward className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span>Encerrar Fase</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Controls & Progress Card: 1 col on mobile, 4 cols on desktop */}
+          <div className="lg:col-span-4 flex flex-col gap-3.5 sm:gap-4">
+            <div className="bg-[#4A0052] rounded-3xl p-4 sm:p-5 border border-[#FE91FE]/30 shadow-lg flex flex-col justify-between">
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-white mb-3 flex items-center gap-2">
+                  <Users className="w-4 h-4 sm:w-5 sm:h-5 text-[#FE91FE]" />
+                  <span>Progresso dos Participantes</span>
+                </h2>
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className="bg-[#6B0075] p-3 sm:p-4 rounded-2xl border border-pink-400/20 text-center sm:text-left">
+                    <span className="text-[11px] sm:text-xs text-pink-200 block">Conectados</span>
+                    <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-white mt-1">
+                      {players.filter((p) => p.connected).length} / {players.length}
+                    </div>
+                  </div>
+
+                  <div className="bg-[#6B0075] p-3 sm:p-4 rounded-2xl border border-pink-400/20 text-center sm:text-left">
+                    <span className="text-[11px] sm:text-xs text-pink-200 block">Concluíram</span>
+                    <div className="text-xl sm:text-2xl lg:text-3xl font-bold text-emerald-400 mt-1">
+                      {finishedCount} / {players.length}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#6B0075]/70 p-3 sm:p-4 rounded-2xl border border-[#FE91FE]/30 text-xs text-pink-100 leading-relaxed mt-3.5 shadow">
+                💡 <b>Lembrete VIRLA:</b> O desempate premia primeiro quem acolhe mais idosos com carinho, depois a pontuação e quem precisou de menos recuperações!
               </div>
             </div>
           </div>
 
-          {/* Controls - Separated buttons with min-h 48px to prevent accidental taps */}
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
-            <button
-              onClick={onTogglePause}
-              className={`flex-1 sm:flex-none min-h-[48px] px-4 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 border transition cursor-pointer text-sm ${
-                isPaused
-                  ? 'bg-amber-500 text-white border-amber-300 animate-pulse'
-                  : 'bg-[#83078E] text-pink-100 border-[#FE91FE]/40 hover:bg-[#83078E]/80'
-              }`}
-            >
-              {isPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
-              <span>{isPaused ? 'Continuar' : 'Pausar'}</span>
-            </button>
-
-            <button
-              onClick={onEndPhase}
-              className="flex-1 sm:flex-none min-h-[48px] px-4 py-2.5 rounded-xl bg-pink-600/40 hover:bg-pink-600/60 text-[#FE91FE] font-bold border border-[#FE91FE]/60 transition flex items-center justify-center gap-2 cursor-pointer text-sm"
-            >
-              <FastForward className="w-5 h-5" />
-              <span>Encerrar Fase</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Live Status and Top Leaderboard */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 flex-1 min-h-0">
-          {/* Status summary */}
-          <div className="bg-[#4A0052] rounded-3xl p-4 sm:p-6 border border-[#FE91FE]/30 flex flex-col justify-between">
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white mb-3 flex items-center gap-2">
-                <Users className="w-5 h-5 text-[#FE91FE]" />
-                <span>Progresso dos Participantes</span>
+          {/* Live Ranking Card: 1 col on mobile, 8 cols on desktop (No horizontal scroll) */}
+          <div className="lg:col-span-8 bg-[#4A0052] rounded-3xl p-4 sm:p-5 border border-[#FE91FE]/30 shadow-lg flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between mb-3 pb-2 border-b border-pink-300/10">
+              <h2 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-400" />
+                <span>Classificação em Tempo Real</span>
               </h2>
-              <div className="grid grid-cols-2 lg:grid-cols-1 gap-3">
-                <div className="bg-[#6B0075] p-3 sm:p-4 rounded-2xl border border-pink-400/20">
-                  <span className="text-xs text-pink-200 block">Conectados</span>
-                  <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
-                    {players.filter((p) => p.connected).length} / {players.length}
-                  </div>
-                </div>
-
-                <div className="bg-[#6B0075] p-3 sm:p-4 rounded-2xl border border-pink-400/20">
-                  <span className="text-xs text-pink-200 block">Concluíram</span>
-                  <div className="text-2xl sm:text-3xl font-bold text-emerald-400 mt-1">
-                    {finishedCount} / {players.length}
-                  </div>
-                </div>
-              </div>
+              <span className="text-xs font-semibold text-pink-300">
+                {players.length} participante{players.length !== 1 ? 's' : ''}
+              </span>
             </div>
 
-            <div className="bg-[#6B0075]/60 p-3 sm:p-4 rounded-2xl border border-[#FE91FE]/30 text-xs text-pink-100 leading-relaxed mt-4">
-              💡 <b>Lembrete VIRLA:</b> O desempate premia primeiro quem acolhe mais idosos com carinho, depois a pontuação e quem precisou de menos recuperações!
-            </div>
-          </div>
-
-          {/* Live Leaderboard - Mobile Cards on Small Screens, Full Table on Large */}
-          <div className="lg:col-span-2 bg-[#4A0052] rounded-3xl p-4 sm:p-6 border border-[#FE91FE]/30 flex flex-col">
-            <h2 className="text-base sm:text-lg font-bold text-white mb-3 flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-yellow-400" />
-              <span>Classificação em Tempo Real</span>
-            </h2>
-
-            {/* Mobile list view */}
-            <div className="sm:hidden space-y-2 overflow-y-auto max-h-[360px] pr-1">
-              {players.slice(0, 15).map((p, idx) => (
-                <div
-                  key={p.id}
-                  className="bg-[#6B0075]/80 p-3 rounded-2xl border border-pink-400/20 flex items-center justify-between text-xs"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-bold text-pink-300 w-5">#{idx + 1}</span>
-                    <span className="text-base">{CHARACTER_SKINS[p.characterIndex]?.badge || '💜'}</span>
-                    <span className="font-semibold text-white truncate max-w-[110px]">{p.nickname}</span>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className="font-bold text-[#FE91FE]">♥ {p.rescuedCount}</span>
-                    <span className="font-mono font-bold text-amber-300">{p.score} pts</span>
-                    {p.currentFinished ? (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">✓</span>
-                    ) : (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-500/20 text-pink-200">...</span>
-                    )}
-                  </div>
+            {/* Compact Ranking List for Mobile and Desktop - Zero Horizontal Scroll */}
+            <div className="space-y-1.5 sm:space-y-2 overflow-y-auto max-h-[460px] pr-1 w-full overflow-x-hidden">
+              {players.length === 0 ? (
+                <div className="text-center py-8 text-pink-300 text-xs sm:text-sm">
+                  Aguardando pontuações dos guardiões...
                 </div>
-              ))}
-            </div>
+              ) : (
+                players.map((p, idx) => (
+                  <div
+                    key={p.id}
+                    className={`p-2.5 sm:p-3 rounded-2xl border transition flex items-center justify-between gap-2 text-xs w-full ${
+                      idx < 3
+                        ? 'bg-[#6B0075] border-[#FE91FE]/50 shadow-md'
+                        : 'bg-[#6B0075]/60 border-pink-400/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1">
+                      <span className={`w-5 sm:w-6 text-center font-bold shrink-0 ${
+                        idx === 0
+                          ? 'text-amber-300 font-extrabold'
+                          : idx === 1
+                          ? 'text-gray-200'
+                          : idx === 2
+                          ? 'text-amber-500'
+                          : 'text-pink-300'
+                      }`}>
+                        #{idx + 1}
+                      </span>
+                      <span className="text-base sm:text-lg shrink-0">
+                        {CHARACTER_SKINS[p.characterIndex]?.badge || '💜'}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold text-white truncate block text-xs sm:text-sm">
+                          {p.nickname}
+                        </span>
+                      </div>
+                    </div>
 
-            {/* Desktop Table View */}
-            <div className="hidden sm:block overflow-y-auto flex-1 max-h-[380px] rounded-2xl border border-pink-300/10">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-[#6B0075] text-pink-200 uppercase text-[11px] font-bold sticky top-0">
-                  <tr>
-                    <th className="py-3 px-4">#</th>
-                    <th className="py-3 px-4">Guardião</th>
-                    <th className="py-3 px-4 text-center">Idosos</th>
-                    <th className="py-3 px-4 text-right">Pontos</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-pink-300/10">
-                  {players.slice(0, 15).map((p, idx) => (
-                    <tr key={p.id} className="hover:bg-[#6B0075]/40 transition">
-                      <td className="py-3 px-4 font-bold text-pink-300">#{idx + 1}</td>
-                      <td className="py-3 px-4 font-semibold text-white flex items-center gap-2">
-                        <span>{CHARACTER_SKINS[p.characterIndex]?.badge || '💜'}</span>
-                        <span>{p.nickname}</span>
-                      </td>
-                      <td className="py-3 px-4 text-center font-bold text-[#FE91FE]">
+                    {/* Compact Metrics without horizontal scroll */}
+                    <div className="flex items-center gap-2 sm:gap-4 shrink-0 text-right">
+                      <span className="font-bold text-[#FE91FE] text-xs sm:text-sm whitespace-nowrap">
                         ♥ {p.rescuedCount}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-amber-300">
-                        {p.score.toLocaleString('pt-BR')}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {p.currentFinished ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                            Concluiu
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-200 border border-pink-500/30">
-                            Jogando
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </span>
+                      <span className="font-mono font-bold text-amber-300 text-xs sm:text-sm whitespace-nowrap">
+                        {p.score} <span className="text-[10px] font-normal text-amber-200 hidden min-[380px]:inline">pts</span>
+                      </span>
+                      {p.currentFinished ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 whitespace-nowrap">
+                          Concluiu
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-pink-500/20 text-pink-200 border border-pink-500/30 whitespace-nowrap">
+                          Jogando
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -592,7 +592,7 @@ export const HostView: React.FC<HostViewProps> = ({
         : '“Cuidar é apoiar, ouvir e construir conexões.” A presença humana e o afeto superam o isolamento.';
 
     return (
-      <div className="flex-1 flex flex-col p-3 sm:p-6 max-w-7xl mx-auto w-full overflow-y-auto">
+      <div className="host-view-layout flex-1 flex flex-col p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full overflow-y-auto overflow-x-hidden">
         {/* Educational takeaway banner with VIRLA Logo */}
         <div className="bg-gradient-to-r from-[#83078E] to-[#6B0075] p-5 sm:p-6 rounded-3xl border-2 border-[#FE91FE] shadow-2xl mb-5 flex flex-col md:flex-row items-center justify-between gap-5">
           <div className="flex items-center gap-4">
@@ -697,7 +697,7 @@ export const HostView: React.FC<HostViewProps> = ({
   // --- 5. PODIUM REVEAL SCREEN (The Climax) ---
   if (roomState === 'PODIUM') {
     return (
-      <div className="flex-1 flex flex-col p-3 sm:p-6 max-w-7xl mx-auto w-full overflow-y-auto">
+      <div className="host-view-layout flex-1 flex flex-col p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full overflow-y-auto overflow-x-hidden">
         {/* Banner with Sweet Candy Award Announcement */}
         <div className="bg-gradient-to-r from-[#83078E] via-[#6B0075] to-[#83078E] p-4 sm:p-6 rounded-3xl border-3 border-[#FE91FE] shadow-2xl text-center mb-5">
           <div className="flex items-center justify-center gap-2 sm:gap-3 mb-2">

@@ -412,8 +412,10 @@ export default function App() {
     });
   };
 
+  const isGameplayActive = mode === 'player' && !!playerId && ['TUTORIAL', 'PHASE_1', 'PHASE_2', 'PHASE_3'].includes(roomState) && !phaseFinished;
+
   return (
-    <div className="min-h-screen w-full flex flex-col bg-[#4A0052] text-white overflow-x-hidden">
+    <div className={`w-full flex flex-col bg-[#4A0052] text-white ${isGameplayActive ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen overflow-y-auto'}`}>
       {/* Brand Header */}
       <VIRLAHeader
         isMuted={isMuted}
@@ -425,18 +427,19 @@ export default function App() {
         onSignOut={handleSignOut}
         isAuthenticated={!!currentUser}
         roomPin={hostPin}
+        hideOnMobileGameplay={isGameplayActive}
       />
 
       {/* Reconnecting Banner */}
       {reconnecting && (
-        <div className="bg-amber-600/95 text-white text-xs font-bold py-1.5 px-4 text-center border-b border-amber-400 animate-pulse z-30">
+        <div className="bg-amber-600/95 text-white text-xs font-bold py-1.5 px-4 text-center border-b border-amber-400 animate-pulse z-30 shrink-0">
           Reconectando ao servidor em tempo real...
         </div>
       )}
 
       {/* Presenter in Participant View Quick Banner */}
-      {mode === 'player' && isHostAuthorized && (
-        <div className="bg-gradient-to-r from-amber-500/20 via-[#83078E]/40 to-amber-500/20 border-b border-amber-400/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200 z-30">
+      {mode === 'player' && isHostAuthorized && !isGameplayActive && (
+        <div className="bg-gradient-to-r from-amber-500/20 via-[#83078E]/40 to-amber-500/20 border-b border-amber-400/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200 z-30 shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-base">👑</span>
             <span>
@@ -456,7 +459,7 @@ export default function App() {
       )}
 
       {/* Main View Area */}
-      <main className="flex-1 flex flex-col overflow-y-auto relative min-h-0">
+      <main className={`flex-1 min-h-0 w-full flex flex-col relative ${isGameplayActive ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         {mode === 'host' && isHostAuthorized ? (
           <HostView
             socket={socketRef.current}
@@ -500,6 +503,9 @@ export default function App() {
             sessionReplacedMessage={sessionReplacedMessage}
             rankings={players}
             onPresenterAuthorized={handlePresenterAuthorized}
+            isMuted={isMuted}
+            onToggleMute={handleToggleMute}
+            onSignOut={handleSignOut}
           />
         )}
       </main>

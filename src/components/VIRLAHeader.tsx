@@ -12,6 +12,7 @@ interface VIRLAHeaderProps {
   onSignOut?: () => void;
   isAuthenticated?: boolean;
   roomPin?: string | null;
+  hideOnMobileGameplay?: boolean;
 }
 
 export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
@@ -24,12 +25,15 @@ export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
   onSignOut,
   isAuthenticated = false,
   roomPin,
+  hideOnMobileGameplay = false,
 }) => {
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   return (
     <>
-      <header className="w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-2 sm:px-4 py-2 flex items-center justify-between text-white z-40 shrink-0 min-h-[52px] select-none">
+      <header className={`w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-2 sm:px-4 py-1.5 sm:py-2 items-center justify-between text-white z-40 shrink-0 min-h-[44px] sm:min-h-[52px] select-none ${
+        hideOnMobileGameplay ? 'hidden sm:flex' : 'flex'
+      }`}>
         {/* Brand & Logo Zone */}
         <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
           <VIRLALogo size="sm" alt="Logo VIRLA" />

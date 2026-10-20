@@ -16,6 +16,8 @@ import {
   Sparkles,
   Smartphone,
   X,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { GameEngine } from '../game/engine';
 import { LEVELS } from '../game/levels';
@@ -62,6 +64,9 @@ interface PlayerViewProps {
   sessionReplacedMessage: string | null;
   rankings: any[];
   onPresenterAuthorized?: (authorized: boolean, idToken: string, isExplicitLogin?: boolean) => void;
+  isMuted?: boolean;
+  onToggleMute?: () => void;
+  onSignOut?: () => void;
 }
 
 // Mini Character Canvas Preview Component
@@ -128,6 +133,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   sessionReplacedMessage,
   rankings,
   onPresenterAuthorized,
+  isMuted = false,
+  onToggleMute,
+  onSignOut,
 }) => {
   // Navigation Steps:
   // 'AUTH' -> 'PROFILE' -> 'PIN' -> (joined room / lobby / gameplay / podium)
@@ -694,7 +702,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (!playerId && currentStep === 'PROFILE') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full overflow-y-auto">
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 pb-16 sm:pb-6 max-w-md mx-auto w-full overflow-y-auto">
         <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl my-auto">
           {/* Logged in User Bar */}
           <div className="flex items-center justify-between bg-[#4A0052]/90 p-3 rounded-2xl border border-pink-400/20 mb-4">
@@ -834,7 +842,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // -------------------------------------------------------------
   if (!playerId && currentStep === 'PIN') {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 max-w-md mx-auto w-full overflow-y-auto">
+      <div className="flex-1 flex flex-col items-center justify-center p-3 sm:p-4 pb-16 sm:pb-6 max-w-md mx-auto w-full overflow-y-auto">
         <div className="w-full bg-[#6B0075] rounded-3xl p-5 sm:p-6 border-2 border-[#FE91FE]/40 shadow-2xl my-auto">
           {/* Confirmed Player Card */}
           <div className="flex items-center justify-between bg-[#4A0052] p-3 rounded-2xl border border-pink-400/30 mb-4 shadow">
@@ -1084,13 +1092,23 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // STEP 5: ACTIVE GAMEPLAY & MOBILE HUD
   // -------------------------------------------------------------
   return (
-    <div className="flex-1 flex flex-col justify-between w-full h-full relative overflow-hidden select-none touch-none overscroll-none">
+    <div className="flex-1 min-h-0 w-full h-full flex flex-col justify-between relative overflow-hidden select-none">
       {/* Top Mobile HUD Bar */}
-      <div className="w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-2.5 sm:px-4 py-1.5 flex items-center justify-between text-xs shrink-0 z-30">
-        {/* Left: Player Nickname & Energy Hearts */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-2 sm:px-4 py-1 sm:py-1.5 flex items-center justify-between text-xs shrink-0 z-40">
+        {/* Left: Player Nickname & Energy Hearts & Optional Exit */}
+        <div className="flex items-center gap-1 sm:gap-2">
+          {onSignOut && (
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="p-1 rounded-lg bg-[#4A0052] border border-pink-400/30 text-pink-300 hover:text-white transition flex items-center justify-center cursor-pointer"
+              title="Sair da partida"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div className="flex items-center gap-1 bg-[#4A0052] px-2 py-1 rounded-lg border border-pink-400/30">
-            <span className="font-bold text-white truncate max-w-[75px] sm:max-w-[120px]">{nickname}</span>
+            <span className="font-bold text-white truncate max-w-[70px] sm:max-w-[120px]">{nickname}</span>
           </div>
           <div className="flex items-center gap-0.5">
             {[1, 2, 3].map((heartIndex) => (
@@ -1107,51 +1125,52 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         </div>
 
         {/* Center: Remaining Timer */}
-        <div className="flex items-center gap-1 bg-[#4A0052] px-2.5 sm:px-3 py-1 rounded-lg border border-pink-400/40 text-amber-300 font-mono font-bold">
+        <div className="flex items-center gap-1 bg-[#4A0052] px-2 sm:px-3 py-1 rounded-lg border border-pink-400/40 text-amber-300 font-mono font-bold">
           <Clock className="w-3.5 h-3.5" />
           <span>{timeRemaining}s</span>
         </div>
 
-        {/* Right: Rescues & Total Score */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          <div className="flex items-center gap-1 bg-[#4A0052] px-2 py-1 rounded-lg border border-pink-400/30 text-white font-semibold">
+        {/* Right: Rescues & Total Score & Audio Mute Toggle */}
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          <div className="flex items-center gap-1 bg-[#4A0052] px-1.5 sm:px-2 py-1 rounded-lg border border-pink-400/30 text-white font-semibold">
             <span>👵</span>
             <span>{rescuedCount}</span>
           </div>
-          <div className="bg-[#83078E] px-2 sm:px-2.5 py-1 rounded-lg border border-[#FE91FE]/40 text-[#FE91FE] font-bold">
+          <div className="bg-[#83078E] px-2 py-1 rounded-lg border border-[#FE91FE]/40 text-[#FE91FE] font-bold">
             {score} pts
           </div>
+          {onToggleMute && (
+            <button
+              type="button"
+              onClick={onToggleMute}
+              className="p-1 rounded-lg bg-[#83078E] border border-[#FE91FE]/40 text-pink-200 hover:text-white transition flex items-center justify-center cursor-pointer"
+              title={isMuted ? 'Ativar som' : 'Silenciar som'}
+            >
+              {isMuted ? <VolumeX className="w-3.5 h-3.5 text-pink-300" /> : <Volume2 className="w-3.5 h-3.5 text-[#FE91FE]" />}
+            </button>
+          )}
         </div>
       </div>
 
       {/* Floating In-Game Notification */}
       {notification && (
-        <div className="absolute top-12 left-1/2 -translate-x-1/2 z-40 bg-[#83078E]/95 border-2 border-[#FE91FE] text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-2xl animate-fade-in flex items-center gap-1.5 max-w-[90%] text-center">
+        <div className="absolute top-11 sm:top-12 left-1/2 -translate-x-1/2 z-40 bg-[#83078E]/95 border-2 border-[#FE91FE] text-white text-xs font-bold px-3 py-1.5 rounded-2xl shadow-2xl animate-fade-in flex items-center gap-1.5 max-w-[90%] text-center">
           <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
           <span>{notification}</span>
         </div>
       )}
 
-      {/* Portrait Suggestion Floating Hint (Non-blocking) */}
-      {isPortrait && !dismissLandscapeNotice && (
-        <div className="absolute top-12 right-2 z-40 bg-[#3B0042]/90 border border-pink-400/40 text-pink-200 text-[10px] px-2.5 py-1 rounded-xl shadow-lg flex items-center gap-1.5 animate-pulse">
-          <Smartphone className="w-3 h-3 text-amber-300 rotate-90" />
-          <span>Dica: Modo paisagem expande a visão</span>
-          <button
-            type="button"
-            onClick={() => setDismissLandscapeNotice(true)}
-            className="text-pink-300 hover:text-white ml-1 p-0.5"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
-
-      {/* Main Game Viewport - Canvas Preserves Invariant 800x500 Aspect Ratio */}
-      <div className="flex-1 flex items-center justify-center relative overflow-hidden bg-[#2D0033] p-1">
+      {/* Main Game Viewport - Canvas with STRICT NO-ZOOM Aspect Ratio Constraints */}
+      <div className="flex-1 min-h-0 w-full flex items-center justify-center relative overflow-hidden bg-[#2D0033] p-1 sm:p-2 touch-none select-none overscroll-none">
         <canvas
           ref={canvasRef}
-          className="w-full max-w-full h-auto max-h-full object-contain shadow-2xl block touch-none select-none"
+          style={{
+            maxWidth: '100%',
+            maxHeight: '100%',
+            aspectRatio: '800 / 500',
+            objectFit: 'contain',
+          }}
+          className="shadow-2xl block touch-none select-none m-auto"
         />
 
         {/* Phase Finished Overlay */}
@@ -1178,10 +1197,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         )}
       </div>
 
-      {/* Mobile Touch Controls - Multi-Touch Enabled, Sized >= 56px, Safe Area Respected */}
-      <div className="w-full bg-[#3B0042]/95 border-t border-pink-400/25 p-2 sm:p-3 pb-safe z-30 flex items-center justify-between shrink-0 select-none touch-none">
+      {/* Mobile Touch Controls - Sized for effortless touch, docked safely on portrait & landscape */}
+      <div className="w-full z-30 select-none touch-none shrink-0 bg-[#3B0042]/95 border-t border-pink-400/25 p-2 sm:p-2.5 pb-safe flex items-center justify-between landscape:absolute landscape:bottom-2 landscape:left-0 landscape:right-0 landscape:bg-transparent landscape:border-0 landscape:px-3 landscape:py-0 landscape:pointer-events-none">
         {/* Left Directional Cluster */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 landscape:pointer-events-auto">
           <button
             type="button"
             onTouchStart={(e) => handleTouchStart('ArrowLeft', e)}
@@ -1195,14 +1214,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowLeft', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 landscape:w-12 landscape:h-12 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowLeft']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
-                : 'bg-[#6B0075] text-white border-pink-400/40'
+                : 'bg-[#6B0075]/95 landscape:bg-[#6B0075]/85 text-white border-pink-400/40'
             }`}
             aria-label="Mover para esquerda"
           >
-            <ArrowLeft className="w-8 h-8" />
+            <ArrowLeft className="w-7 h-7 sm:w-8 sm:h-8" />
           </button>
 
           <button
@@ -1218,19 +1237,19 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowRight', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 landscape:w-12 landscape:h-12 rounded-2xl flex items-center justify-center border-2 shadow-lg transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowRight']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
-                : 'bg-[#6B0075] text-white border-pink-400/40'
+                : 'bg-[#6B0075]/95 landscape:bg-[#6B0075]/85 text-white border-pink-400/40'
             }`}
             aria-label="Mover para direita"
           >
-            <ArrowRight className="w-8 h-8" />
+            <ArrowRight className="w-7 h-7 sm:w-8 sm:h-8" />
           </button>
         </div>
 
         {/* Right Action & Jump Cluster */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 landscape:pointer-events-auto">
           {/* Contextual Action / Shield Button */}
           <button
             type="button"
@@ -1245,15 +1264,15 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('KeyE', false);
             }}
-            className={`min-h-[56px] h-14 sm:h-16 px-3.5 sm:px-4 rounded-2xl flex items-center justify-center gap-1.5 border-2 shadow-lg font-bold text-xs uppercase tracking-wider transition active:scale-95 cursor-pointer touch-none select-none ${
+            className={`min-h-[56px] h-14 sm:h-16 landscape:min-h-[48px] landscape:h-12 px-3 sm:px-4 landscape:px-3 rounded-2xl flex items-center justify-center gap-1.5 border-2 shadow-lg font-bold text-xs uppercase tracking-wider transition active:scale-95 cursor-pointer touch-none select-none ${
               contextualBtn.isContextual
                 ? 'bg-amber-400 text-amber-950 border-white animate-pulse'
-                : 'bg-[#83078E] text-[#FE91FE] border-pink-400/40'
+                : 'bg-[#83078E]/95 landscape:bg-[#83078E]/85 text-[#FE91FE] border-pink-400/40'
             }`}
             aria-label={contextualBtn.label}
           >
-            <Shield className="w-5 h-5 shrink-0" />
-            <span className="truncate max-w-[85px] sm:max-w-none">{contextualBtn.label}</span>
+            <Shield className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span className="truncate max-w-[80px] sm:max-w-none">{contextualBtn.label}</span>
           </button>
 
           {/* Jump Button */}
@@ -1270,14 +1289,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               e.preventDefault();
               engineRef.current?.setTouchInput('ArrowUp', false);
             }}
-            className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex flex-col items-center justify-center border-2 shadow-lg font-bold transition active:scale-95 cursor-pointer touch-none select-none ${
+            className={`w-14 h-14 sm:w-16 sm:h-16 landscape:w-12 landscape:h-12 rounded-2xl flex flex-col items-center justify-center border-2 shadow-lg font-bold transition active:scale-95 cursor-pointer touch-none select-none ${
               touchState['ArrowUp']
                 ? 'bg-[#FE91FE] text-[#6B0075] border-white'
                 : 'bg-gradient-to-br from-[#FE91FE] to-[#83078E] text-white border-white/60'
             }`}
             aria-label="Pular"
           >
-            <ArrowUp className="w-7 h-7" />
+            <ArrowUp className="w-6 h-6 sm:w-7 sm:h-7" />
             <span className="text-[9px] uppercase tracking-wider leading-none">Pular</span>
           </button>
         </div>
