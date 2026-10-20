@@ -361,12 +361,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // Profile Save Submit Handler (Step 2)
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nicknameInput.trim()) {
-      setProfileError('Por favor, informe seu nome de exibição.');
+    const cleanNick = nicknameInput.trim();
+    if (!cleanNick || cleanNick.length < 2) {
+      setProfileError('Por favor, informe seu nome de exibição (entre 2 e 16 caracteres).');
       return;
     }
-    if (!googleUser || !idTokenString) {
-      setProfileError('Sessão expirada. Faça login novamente.');
+    if (!googleUser) {
+      setProfileError('Sessão não identificada. Por favor, conecte-se com sua conta Google.');
       setCurrentStep('AUTH');
       return;
     }
@@ -375,25 +376,72 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     setProfileError(null);
 
     try {
+      // Get fresh Firebase ID token if needed
+      let token = idTokenString;
+      if (!token && auth.currentUser) {
+        token = await auth.currentUser.getIdToken();
+        setIdTokenString(token);
+      }
+
+      if (!token) {
+        setProfileError('Sessão expirada. Reconecte sua conta Google para continuar.');
+        setCurrentStep('AUTH');
+        return;
+      }
+
       const res = await fetch('/api/profile/save', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({
-          idToken: idTokenString,
-          nickname: nicknameInput.trim(),
+          idToken: token,
+          nickname: cleanNick,
           characterIndex: selectedSkin,
         }),
       });
-      const data = await res.json();
 
-      if (data.success) {
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = null;
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+      } else {
+        const textFallback = await res.text().catch(() => '');
+        console.warn('Servidor respondeu com formato não-JSON:', res.status, textFallback.substring(0, 100));
+      }
+
+      // Check HTTP status code explicitly
+      if (!res.ok) {
+        if (res.status === 404) {
+          setProfileError('Rota de salvamento não encontrada no servidor (HTTP 404). Verifique se a mesma versão de build foi publicada no backend.');
+        } else if (res.status === 401 || res.status === 403) {
+          setProfileError(data?.message || 'Sessão de autenticação Firebase expirada ou inválida. Por favor, reconecte sua conta Google.');
+        } else if (res.status === 400) {
+          setProfileError(data?.message || 'Dados inválidos para o perfil. Verifique o apelido e o personagem.');
+        } else if (res.status >= 500) {
+          setProfileError(data?.message || 'Erro interno no servidor ao salvar perfil (HTTP 500). Tente novamente em instantes.');
+        } else {
+          setProfileError(data?.message || `Falha ao salvar o perfil (Código HTTP ${res.status}).`);
+        }
+        return;
+      }
+
+      // Strictly advance ONLY when the server confirms successful persistence
+      if (data && data.success && data.profile) {
         setHasExistingProfile(true);
         setCurrentStep('PIN');
       } else {
-        setProfileError(data.message || 'Erro ao salvar o perfil.');
+        setProfileError(data?.message || 'O servidor não pôde confirmar o salvamento do perfil.');
       }
-    } catch (err) {
-      setProfileError('Falha na comunicação com o servidor ao salvar o perfil.');
+    } catch (err: any) {
+      console.error('Erro de rede ao salvar perfil:', err);
+      setProfileError(`Falha na comunicação de rede com o servidor: ${err?.message || 'verifique sua conexão'}.`);
     } finally {
       setIsSavingProfile(false);
     }

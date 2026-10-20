@@ -512,51 +512,68 @@ app.get('/api/profile/:googleId', (req, res) => {
   return res.json({ success: true, profile });
 });
 
-app.post('/api/profile', async (req, res) => {
-  const { googleId, nickname, characterIndex, idToken } = req.body;
+// Handler for saving/updating player profile - Strictly requires valid Firebase ID token
+// and binds the profile to the verified Firebase UID (never trusts a client-supplied UID)
+const handleProfileSave = async (req: express.Request, res: express.Response) => {
+  try {
+    const { idToken, nickname, characterIndex } = req.body || {};
 
-  if (!googleId || typeof googleId !== 'string') {
-    return res.status(400).json({ success: false, message: 'Identificador do usuário Firebase não fornecido.' });
-  }
-
-  const cleanNickname = String(nickname || '').trim().substring(0, 16);
-  if (!cleanNickname || cleanNickname.length < 2) {
-    return res.status(400).json({ success: false, message: 'O apelido deve ter entre 2 e 16 caracteres.' });
-  }
-
-  const charIndex = Math.max(0, Math.min(2, Number(characterIndex) || 0));
-
-  let email = '';
-  let name = '';
-  let picture = '';
-  if (idToken) {
-    const verified = await verifyFirebaseIdToken(idToken);
-    if (verified) {
-      email = verified.email || '';
-      name = verified.name || '';
-      picture = verified.picture || '';
+    if (!idToken || typeof idToken !== 'string') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token de autenticação Firebase não fornecido ou inválido.',
+      });
     }
+
+    const verified = await verifyFirebaseIdToken(idToken);
+    if (!verified || !verified.uid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Autenticação Firebase necessária ou sessão expirada. Por favor, conecte-se com Google.',
+      });
+    }
+
+    const cleanNickname = String(nickname || '').trim().substring(0, 16);
+    if (!cleanNickname || cleanNickname.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'O apelido deve ter entre 2 e 16 caracteres.',
+      });
+    }
+
+    const charIndex = Math.max(0, Math.min(2, Number(characterIndex) || 0));
+    const uid = verified.uid;
+
+    const existing = userProfiles.get(uid);
+    const updatedProfile: UserProfile = {
+      googleId: uid, // Guaranteed to be the verified Firebase UID
+      email: verified.email || existing?.email || '',
+      name: verified.name || existing?.name || '',
+      picture: verified.picture || existing?.picture || '',
+      nickname: cleanNickname,
+      characterIndex: charIndex,
+      createdAt: existing?.createdAt || Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    userProfiles.set(uid, updatedProfile);
+
+    return res.status(200).json({
+      success: true,
+      profile: updatedProfile,
+    });
+  } catch (err: any) {
+    console.error('Erro ao salvar perfil no servidor:', err);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro interno ao salvar o perfil no servidor.',
+    });
   }
+};
 
-  const existing = userProfiles.get(googleId);
-  const updatedProfile: UserProfile = {
-    googleId,
-    email: email || existing?.email || '',
-    name: name || existing?.name || '',
-    picture: picture || existing?.picture || '',
-    nickname: cleanNickname,
-    characterIndex: charIndex,
-    createdAt: existing?.createdAt || Date.now(),
-    updatedAt: Date.now(),
-  };
-
-  userProfiles.set(googleId, updatedProfile);
-
-  return res.json({
-    success: true,
-    profile: updatedProfile,
-  });
-});
+// Register BOTH /api/profile/save and /api/profile to guarantee compatibility
+app.post('/api/profile/save', handleProfileSave);
+app.post('/api/profile', handleProfileSave);
 
 app.post('/api/host/verify', async (req, res) => {
   const { idToken } = req.body;
@@ -637,6 +654,14 @@ app.get('/api/room/:pin/export.csv', (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="VIRLA_Resultado_${room.pin}.csv"`);
   res.send('\uFEFF' + csv); // UTF-8 BOM for Excel compatibility
+});
+
+// API 404 Fallback: Ensure all unmatched /api/* requests return structured JSON, never HTML
+app.all('/api/*', (req, res) => {
+  return res.status(404).json({
+    success: false,
+    message: `Rota de API não encontrada: ${req.method} ${req.path}`,
+  });
 });
 
 const server = http.createServer(app);
@@ -1175,7 +1200,9 @@ wss.on('connection', (ws: WebSocket) => {
 
 // Serve frontend with Vite middlewares in development
 async function startServer() {
-  const PORT = 3000;
+  const PORT = process.env.PORT && process.env.PORT !== '8080'
+    ? Number(process.env.PORT)
+    : 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
