@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered player profile associated with Google account",
+      "type": "object",
+      "properties": {
+        "googleId": {
+          "type": "string",
+          "description": "Google sub stable identifier"
+        },
+        "email": {
+          "type": "string",
+          "description": "Private Google account email"
+        },
+        "nickname": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Display name in games and ranking"
+        },
+        "characterIndex": {
+          "type": "number",
+          "description": "Index of selected character (0: Clara, 1: Lucas, 2: Mariana)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Account registration timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Profile last update timestamp"
+        }
+      },
+      "required": ["googleId", "nickname", "characterIndex"]
+    },
+    "GameSession": {
+      "title": "GameSession",
+      "description": "Record of a game session and player performance",
+      "type": "object",
+      "properties": {
+        "pin": {
+          "type": "string",
+          "description": "Room PIN code"
+        },
+        "googleId": {
+          "type": "string",
+          "description": "Google user identifier"
+        },
+        "nickname": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Player nickname"
+        },
+        "characterIndex": {
+          "type": "number",
+          "description": "Character skin index"
+        },
+        "score": {
+          "type": "number",
+          "description": "Total score achieved"
+        },
+        "rescuedCount": {
+          "type": "number",
+          "description": "Number of elderly rescued"
+        },
+        "recoveries": {
+          "type": "number",
+          "description": "Number of recoveries/falls"
+        },
+        "finishedAt": {
+          "type": "string",
+          "description": "Timestamp when finished"
+        }
+      },
+      "required": ["pin", "googleId", "nickname", "score", "rescuedCount"]
+    },
+    "AdminConfig": {
+      "title": "AdminConfig",
+      "description": "Presenter authorization whitelist",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Authorized presenter email"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role description (e.g. presenter)"
+        }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile collection indexed by Google UID"
+    },
+    "/game_results/{resultId}": {
+      "schema": "GameSession",
+      "description": "Archived game results"
+    },
+    "/admins/{adminId}": {
+      "schema": "AdminConfig",
+      "description": "Presenter authorization records"
+    }
+  }
+}

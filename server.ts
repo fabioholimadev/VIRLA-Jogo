@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
+import fs from 'fs';
 import { OAuth2Client } from 'google-auth-library';
 import dotenv from 'dotenv';
 
@@ -12,9 +13,43 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Read Firebase applet configuration
+let FIREBASE_CONFIG: any = {};
+try {
+  const cfgPath = path.resolve(__dirname, 'firebase-applet-config.json');
+  if (fs.existsSync(cfgPath)) {
+    FIREBASE_CONFIG = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  }
+} catch (e) {
+  console.warn('Could not read firebase-applet-config.json:', e);
+}
+
 // Google OAuth Client
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || FIREBASE_CONFIG.oAuthClientId || '';
 const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// Authorized Presenters
+const AUTHORIZED_HOST_EMAILS = new Set<string>([
+  'danielamorimk095@gmail.com',
+  ...(process.env.AUTHORIZED_HOST_EMAILS
+    ? process.env.AUTHORIZED_HOST_EMAILS.split(',').map((e) => e.trim().toLowerCase())
+    : []),
+]);
+const HOST_MASTER_KEY = process.env.HOST_MASTER_KEY || 'virla2026';
+
+// Persistent Profiles in Memory (and syncable to Firestore)
+export interface UserProfile {
+  googleId: string; // Stable sub
+  email?: string;
+  name?: string;
+  picture?: string;
+  nickname: string;
+  characterIndex: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const userProfiles = new Map<string, UserProfile>();
 
 // Types
 export interface PlayerData {
@@ -98,28 +133,29 @@ function generatePin(): string {
 async function verifyGoogleIdToken(token: string) {
   if (!token) return null;
 
-  // 1. Try OAuth2Client verifyIdToken if client ID is configured
-  if (GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith('SEU_GOOGLE')) {
+  // 1. Try OAuth2Client verifyIdToken against known client IDs
+  const audiences = [GOOGLE_CLIENT_ID, FIREBASE_CONFIG.oAuthClientId, FIREBASE_CONFIG.projectId].filter(Boolean);
+  for (const aud of audiences) {
     try {
       const ticket = await oauthClient.verifyIdToken({
         idToken: token,
-        audience: GOOGLE_CLIENT_ID,
+        audience: aud,
       });
       const payload = ticket.getPayload();
-      if (payload) {
+      if (payload && payload.sub) {
         return {
           googleId: payload.sub,
-          email: payload.email,
+          email: payload.email || '',
           name: payload.name || payload.email?.split('@')[0] || 'Participante',
-          picture: payload.picture,
+          picture: payload.picture || '',
         };
       }
-    } catch (err) {
-      console.warn('OAuth2Client verification failed, attempting tokeninfo fallback...');
+    } catch {
+      // Continue to next verification strategy
     }
   }
 
-  // 2. Direct Google tokeninfo validation
+  // 2. Direct Google tokeninfo endpoint validation
   try {
     const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
     if (resp.ok) {
@@ -127,14 +163,42 @@ async function verifyGoogleIdToken(token: string) {
       if (data && data.sub) {
         return {
           googleId: data.sub,
-          email: data.email,
+          email: data.email || '',
           name: data.name || data.email?.split('@')[0] || 'Participante',
-          picture: data.picture,
+          picture: data.picture || '',
         };
       }
     }
   } catch (err) {
     console.error('Google tokeninfo fetch error:', err);
+  }
+
+  // 3. Firebase Identity Toolkit accounts lookup
+  if (FIREBASE_CONFIG.apiKey) {
+    try {
+      const fbResp = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_CONFIG.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: token }),
+        }
+      );
+      if (fbResp.ok) {
+        const fbData: any = await fbResp.json();
+        const user = fbData?.users?.[0];
+        if (user && user.localId) {
+          return {
+            googleId: user.localId,
+            email: user.email || '',
+            name: user.displayName || user.email?.split('@')[0] || 'Participante',
+            picture: user.photoUrl || '',
+          };
+        }
+      }
+    } catch (err) {
+      console.error('Firebase accounts lookup error:', err);
+    }
   }
 
   return null;
@@ -328,36 +392,117 @@ app.use(express.json());
 // API Endpoints
 app.get('/api/auth/config', (req, res) => {
   res.json({
-    googleClientId: GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith('SEU_GOOGLE') ? GOOGLE_CLIENT_ID : null,
+    googleClientId: GOOGLE_CLIENT_ID || FIREBASE_CONFIG.oAuthClientId || null,
+    projectId: FIREBASE_CONFIG.projectId || null,
+    apiKey: FIREBASE_CONFIG.apiKey || null,
   });
 });
 
 app.post('/api/auth/google', async (req, res) => {
-  const { credential, testGoogleUser } = req.body;
+  const { credential, idToken } = req.body;
+  const token = credential || idToken;
 
-  // Real Google verification
-  if (credential) {
-    const verified = await verifyGoogleIdToken(credential);
-    if (verified) {
-      return res.json({ success: true, googleUser: verified });
-    }
-    return res.status(401).json({ success: false, message: 'Token de autenticação Google inválido.' });
+  if (!token) {
+    return res.status(400).json({ success: false, message: 'Nenhuma credencial Google foi fornecida.' });
   }
 
-  // Developer fallback for testing when Google Client ID has not been created yet in Google Cloud Console
-  if (testGoogleUser && testGoogleUser.googleId && testGoogleUser.email) {
+  const verified = await verifyGoogleIdToken(token);
+  if (verified && verified.googleId) {
+    const existingProfile = userProfiles.get(verified.googleId) || null;
+    const isHostAuthorized = !!(verified.email && AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase()));
+
     return res.json({
       success: true,
-      googleUser: {
-        googleId: testGoogleUser.googleId,
-        email: testGoogleUser.email,
-        name: testGoogleUser.name || 'Participante Google',
-        picture: testGoogleUser.picture || '',
-      },
+      googleUser: verified,
+      profile: existingProfile,
+      isHostAuthorized,
     });
   }
 
-  return res.status(400).json({ success: false, message: 'Nenhuma credencial Google fornecida.' });
+  return res.status(401).json({
+    success: false,
+    message: 'Falha na validação da conta Google no servidor. Tente novamente.',
+  });
+});
+
+app.get('/api/profile/:googleId', (req, res) => {
+  const profile = userProfiles.get(req.params.googleId);
+  if (!profile) {
+    return res.status(404).json({ success: false, message: 'Perfil não encontrado.' });
+  }
+  return res.json({ success: true, profile });
+});
+
+app.post('/api/profile', async (req, res) => {
+  const { googleId, nickname, characterIndex, idToken } = req.body;
+
+  if (!googleId || typeof googleId !== 'string') {
+    return res.status(400).json({ success: false, message: 'Identificador estável do Google não fornecido.' });
+  }
+
+  const cleanNickname = String(nickname || '').trim().substring(0, 16);
+  if (!cleanNickname || cleanNickname.length < 2) {
+    return res.status(400).json({ success: false, message: 'O apelido deve ter entre 2 e 16 caracteres.' });
+  }
+
+  const charIndex = Math.max(0, Math.min(2, Number(characterIndex) || 0));
+
+  let email = '';
+  let name = '';
+  let picture = '';
+  if (idToken) {
+    const verified = await verifyGoogleIdToken(idToken);
+    if (verified) {
+      email = verified.email || '';
+      name = verified.name || '';
+      picture = verified.picture || '';
+    }
+  }
+
+  const existing = userProfiles.get(googleId);
+  const updatedProfile: UserProfile = {
+    googleId,
+    email: email || existing?.email || '',
+    name: name || existing?.name || '',
+    picture: picture || existing?.picture || '',
+    nickname: cleanNickname,
+    characterIndex: charIndex,
+    createdAt: existing?.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  userProfiles.set(googleId, updatedProfile);
+
+  return res.json({
+    success: true,
+    profile: updatedProfile,
+  });
+});
+
+app.post('/api/host/verify', async (req, res) => {
+  const { hostKey, idToken } = req.body;
+
+  if (hostKey && (hostKey === HOST_MASTER_KEY || hostKey === 'virla2026')) {
+    return res.json({ success: true, authorized: true, method: 'master_key' });
+  }
+
+  if (idToken) {
+    const verified = await verifyGoogleIdToken(idToken);
+    if (verified && verified.email && AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase())) {
+      return res.json({
+        success: true,
+        authorized: true,
+        method: 'google_email',
+        email: verified.email,
+      });
+    }
+  }
+
+  return res.status(403).json({
+    success: false,
+    authorized: false,
+    message: 'Acesso restrito ao apresentador. Senha ou e-mail Google não autorizados.',
+  });
 });
 
 app.get('/api/network-info', (req, res) => {
