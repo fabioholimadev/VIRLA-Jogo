@@ -81,9 +81,12 @@ export const HostView: React.FC<HostViewProps> = ({
       .catch(() => {});
   }, []);
 
-  // Compute join URL
+  // Compute join URL (uses public origin on web cloud preview or LAN IP on localhost)
   const joinUrl = React.useMemo(() => {
     if (!pin) return '';
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return `${window.location.origin}?pin=${pin}`;
+    }
     const host = networkInfo?.localIp || window.location.hostname;
     const port = networkInfo?.port || window.location.port || '3000';
     return `http://${host}:${port}?pin=${pin}`;

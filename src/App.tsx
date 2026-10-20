@@ -3,7 +3,9 @@ import { VIRLAHeader } from './components/VIRLAHeader';
 import { HostView } from './components/HostView';
 import { PlayerView, GoogleUser } from './components/PlayerView';
 import { sound } from './game/audio';
-import { Lock, KeyRound, Monitor, X, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Monitor } from 'lucide-react';
+import { auth } from './firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 export default function App() {
   const [mode, setMode] = useState<'host' | 'player'>('player');
@@ -14,12 +16,9 @@ export default function App() {
   const [connected, setConnected] = useState<boolean>(false);
   const [reconnecting, setReconnecting] = useState<boolean>(false);
 
-  // Presenter Authorization State
+  // Presenter Authorization State (Server-verified Firebase Custom Claim)
   const [isHostAuthorized, setIsHostAuthorized] = useState<boolean>(false);
-  const [showHostAuthModal, setShowHostAuthModal] = useState<boolean>(false);
-  const [hostKeyInput, setHostKeyInput] = useState<string>('');
-  const [hostAuthError, setHostAuthError] = useState<string | null>(null);
-  const [isVerifyingHost, setIsVerifyingHost] = useState<boolean>(false);
+  const [hostIdToken, setHostIdToken] = useState<string | null>(null);
 
   // Host state
   const [hostPin, setHostPin] = useState<string | null>(null);
@@ -47,46 +46,14 @@ export default function App() {
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [players, setPlayers] = useState<any[]>([]);
 
-  // Query parameter PIN
+  // Query parameter PIN (from scanning QR code)
   const [queryPin, setQueryPin] = useState<string>('');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const pin = params.get('pin');
-    const urlMode = params.get('mode');
-    const hostFlag = params.get('host');
-    const adminFlag = params.get('admin');
-    const urlKey = params.get('key');
-
     if (pin) {
       setQueryPin(pin);
-    }
-
-    // Check presenter authorization
-    const savedHostAuth = sessionStorage.getItem('virla_host_authorized');
-    const isMasterKeyInUrl = urlKey === 'virla2026';
-
-    if (isMasterKeyInUrl || savedHostAuth === 'true') {
-      setIsHostAuthorized(true);
-      if (urlMode === 'host' || hostFlag === '1' || adminFlag === '1') {
-        setMode('host');
-      }
-    } else if (urlMode === 'host' || hostFlag === '1' || adminFlag === '1') {
-      // User explicitly tried to access host view: show authorization prompt
-      setShowHostAuthModal(true);
-      setMode('player');
-    }
-
-    // Check saved Google user email for authorized host
-    const savedGoogle = sessionStorage.getItem('virla_google_user');
-    if (savedGoogle) {
-      try {
-        const parsed = JSON.parse(savedGoogle);
-        if (parsed.email && parsed.email.toLowerCase() === 'danielamorimk095@gmail.com') {
-          setIsHostAuthorized(true);
-          sessionStorage.setItem('virla_host_authorized', 'true');
-        }
-      } catch {}
     }
 
     // Try loading saved host session
@@ -102,6 +69,40 @@ export default function App() {
     if (savedPlayerToken) {
       setSessionToken(savedPlayerToken);
     }
+  }, []);
+
+  // Listen to Firebase Auth state for server-side verified presenter authorization
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          setHostIdToken(token);
+
+          const res = await fetch('/api/host/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken: token }),
+          });
+          const data = await res.json();
+
+          if (data.success && data.authorized) {
+            setIsHostAuthorized(true);
+            setMode('host');
+          } else {
+            setIsHostAuthorized(false);
+          }
+        } catch {
+          setIsHostAuthorized(false);
+        }
+      } else {
+        setIsHostAuthorized(false);
+        setHostIdToken(null);
+        setMode('player');
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // WebSocket Connection & Lifecycle
@@ -128,6 +129,7 @@ export default function App() {
               type: 'HOST_RECONNECT',
               pin: savedHostPin,
               hostSecret: savedHostSecret,
+              idToken: hostIdToken || undefined,
             })
           );
         }
@@ -261,11 +263,14 @@ export default function App() {
           }
 
           if (msg.type === 'KICKED') {
-            alert(msg.reason || 'Você foi desconectado da sala.');
             sessionStorage.removeItem('virla_player_token');
             sessionStorage.removeItem('virla_player_pin');
             setPlayerId(null);
             setSessionToken(null);
+          }
+
+          if (msg.type === 'ERROR') {
+            console.warn('WebSocket message error:', msg.message);
           }
         } catch (err) {
           console.error('Error handling WebSocket message:', err);
@@ -289,7 +294,7 @@ export default function App() {
       clearTimeout(reconnectTimeout);
       if (ws) ws.close();
     };
-  }, []);
+  }, [hostIdToken]);
 
   const handleToggleMute = () => {
     const muted = sound.toggleMute();
@@ -302,38 +307,22 @@ export default function App() {
     }
   };
 
-  // Host Verification Method
-  const handleVerifyHostKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsVerifyingHost(true);
-    setHostAuthError(null);
-
-    try {
-      const res = await fetch('/api/host/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostKey: hostKeyInput.trim() }),
-      });
-      const data = await res.json();
-
-      if (data.success && data.authorized) {
-        setIsHostAuthorized(true);
-        sessionStorage.setItem('virla_host_authorized', 'true');
-        setShowHostAuthModal(false);
-        setMode('host');
-      } else {
-        setHostAuthError('Chave mestra do apresentador incorreta.');
-      }
-    } catch {
-      setHostAuthError('Falha ao verificar autorização no servidor.');
-    } finally {
-      setIsVerifyingHost(false);
+  const handlePresenterAuthorized = (authorized: boolean, idToken: string) => {
+    setIsHostAuthorized(authorized);
+    setHostIdToken(idToken);
+    if (authorized) {
+      setMode('host');
     }
   };
 
   // Host Actions
-  const handleCreateRoom = () => {
-    sendWsMessage({ type: 'HOST_CREATE_ROOM' });
+  const handleCreateRoom = async () => {
+    let token = hostIdToken;
+    if (!token && auth.currentUser) {
+      token = await auth.currentUser.getIdToken();
+      setHostIdToken(token);
+    }
+    sendWsMessage({ type: 'HOST_CREATE_ROOM', idToken: token });
   };
 
   const handleStartCountdown = (targetState: string) => {
@@ -356,7 +345,7 @@ export default function App() {
     sendWsMessage({ type: 'HOST_KICK_PLAYER', playerId: targetPlayerId });
   };
 
-  // Player Actions with Google Auth
+  // Player Actions with Firebase Auth
   const handleJoinRoom = (pin: string, nickname: string, charIndex: number, googleUser: GoogleUser) => {
     sendWsMessage({
       type: 'PLAYER_JOIN',
@@ -377,63 +366,14 @@ export default function App() {
         onToggleMute={handleToggleMute}
         mode={mode}
         onExitHost={() => setMode('player')}
-        onRequestHostAccess={() => setShowHostAuthModal(true)}
+        isHostAuthorized={isHostAuthorized}
+        onOpenHost={() => setMode('host')}
       />
 
       {/* Reconnecting Banner */}
       {reconnecting && (
         <div className="bg-amber-600/90 text-white text-xs font-bold py-1 px-4 text-center border-b border-amber-400 animate-pulse">
           Reconectando ao servidor em tempo real...
-        </div>
-      )}
-
-      {/* Host Authorization Modal (Restricted Presenter Access) */}
-      {showHostAuthModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#6B0075] border-2 border-amber-400 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative">
-            <button
-              onClick={() => setShowHostAuthModal(false)}
-              className="absolute top-4 right-4 text-pink-300 hover:text-white transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400 text-amber-300 flex items-center justify-center mx-auto mb-3">
-              <Lock className="w-6 h-6" />
-            </div>
-
-            <h3 className="font-shrikhand text-xl text-white text-center mb-1">
-              Acesso do Apresentador
-            </h3>
-            <p className="text-xs text-pink-200 text-center mb-4">
-              Área restrita à organização da Semana de Tecnologia. Informe a chave mestra ou acesse via conta autorizada.
-            </p>
-
-            {hostAuthError && (
-              <div className="bg-red-500/25 border border-red-400 text-red-100 text-xs rounded-xl p-2.5 mb-3 text-center">
-                {hostAuthError}
-              </div>
-            )}
-
-            <form onSubmit={handleVerifyHostKey} className="space-y-3">
-              <input
-                type="password"
-                value={hostKeyInput}
-                onChange={(e) => setHostKeyInput(e.target.value)}
-                placeholder="Chave mestra do apresentador"
-                className="w-full bg-[#4A0052] border border-amber-400/50 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-400 font-mono"
-                autoFocus
-              />
-
-              <button
-                type="submit"
-                disabled={isVerifyingHost || !hostKeyInput.trim()}
-                className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 text-amber-950 font-bold text-xs uppercase tracking-wider shadow hover:bg-amber-300 transition cursor-pointer disabled:opacity-50"
-              >
-                {isVerifyingHost ? 'Verificando...' : 'Acessar Painel do Telão'}
-              </button>
-            </form>
-          </div>
         </div>
       )}
 
@@ -480,16 +420,17 @@ export default function App() {
             joinError={joinError}
             sessionReplacedMessage={sessionReplacedMessage}
             rankings={players}
+            onPresenterAuthorized={handlePresenterAuthorized}
           />
         )}
       </main>
 
-      {/* Discreet Footer link for Presenter (Only shown if authorized or via key) */}
+      {/* Discreet Footer link for Presenter (Only shown if authenticated & authorized) */}
       {mode === 'player' && isHostAuthorized && (
         <div className="py-1 px-4 bg-[#3B0042] border-t border-pink-400/20 text-center">
           <button
             onClick={() => setMode('host')}
-            className="text-[10px] text-amber-300 hover:text-amber-200 font-semibold tracking-wider uppercase inline-flex items-center gap-1 transition"
+            className="text-[10px] text-amber-300 hover:text-amber-200 font-semibold tracking-wider uppercase inline-flex items-center gap-1 transition cursor-pointer"
           >
             <Monitor className="w-3 h-3" />
             <span>Abrir Painel do Apresentador (Telão)</span>

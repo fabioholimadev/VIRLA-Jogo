@@ -64,6 +64,7 @@ interface PlayerViewProps {
   joinError: string | null;
   sessionReplacedMessage: string | null;
   rankings: any[];
+  onPresenterAuthorized?: (authorized: boolean, idToken: string) => void;
 }
 
 // Mini Character Canvas Preview Component
@@ -129,6 +130,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   joinError,
   sessionReplacedMessage,
   rankings,
+  onPresenterAuthorized,
 }) => {
   // Navigation Steps:
   // 'AUTH' -> 'PROFILE' -> 'PIN' -> (joined room / lobby / gameplay / podium)
@@ -138,6 +140,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [googleUser, setGoogleUser] = useState<GoogleUser | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [presenterNotice, setPresenterNotice] = useState<string | null>(null);
   const [idTokenString, setIdTokenString] = useState<string>('');
 
   // Profile Form State
@@ -236,6 +239,20 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             setGoogleUser(data.googleUser);
             sessionStorage.setItem('virla_google_user', JSON.stringify(data.googleUser));
 
+            if (data.isHostAuthorized) {
+              onPresenterAuthorized?.(true, token);
+            } else {
+              onPresenterAuthorized?.(false, token);
+            }
+
+            if (data.presenterClaimPending) {
+              setPresenterNotice(
+                'Conta fabiooliveiral2020@gmail.com conectada. A custom claim presenter: true precisa ser atribuída no Firebase Authentication via Admin SDK para liberar o painel do apresentador.'
+              );
+            } else {
+              setPresenterNotice(null);
+            }
+
             if (data.profile) {
               setNicknameInput(data.profile.nickname);
               setSelectedSkin(data.profile.characterIndex);
@@ -258,6 +275,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         }
       } else {
         setGoogleUser(null);
+        onPresenterAuthorized?.(false, '');
+        setPresenterNotice(null);
         if (!playerId) {
           setCurrentStep('AUTH');
         }
@@ -271,10 +290,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const handleGoogleSignIn = async () => {
     setIsAuthenticating(true);
     setAuthError(null);
+    setPresenterNotice(null);
 
     try {
       const result = await signInWithPopup(auth, googleAuthProvider);
-      const token = await result.user.getIdToken();
+      const token = await result.user.getIdToken(true);
       setIdTokenString(token);
 
       const res = await fetch('/api/auth/google', {
@@ -287,6 +307,20 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       if (data.success && data.googleUser) {
         setGoogleUser(data.googleUser);
         sessionStorage.setItem('virla_google_user', JSON.stringify(data.googleUser));
+
+        if (data.isHostAuthorized) {
+          onPresenterAuthorized?.(true, token);
+        } else {
+          onPresenterAuthorized?.(false, token);
+        }
+
+        if (data.presenterClaimPending) {
+          setPresenterNotice(
+            'Conta fabiooliveiral2020@gmail.com conectada. A custom claim presenter: true precisa ser atribuída no Firebase Authentication via Admin SDK para liberar o painel do apresentador.'
+          );
+        } else {
+          setPresenterNotice(null);
+        }
 
         if (data.profile) {
           setNicknameInput(data.profile.nickname);
@@ -322,6 +356,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       await signOut(auth);
     } catch {}
     setGoogleUser(null);
+    onPresenterAuthorized?.(false, '');
+    setPresenterNotice(null);
     sessionStorage.removeItem('virla_google_user');
     setCurrentStep('AUTH');
   };
@@ -553,6 +589,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               Ajude o Sr. Jorge e outras pessoas idosas, supere a Desorganização e o Isolamento, e dispute os doces do pódio final na Semana de Tecnologia.
             </p>
           </div>
+
+          {/* Presenter Notice Banner */}
+          {presenterNotice && (
+            <div className="bg-amber-500/20 border border-amber-400 text-amber-100 text-xs rounded-xl p-3 mb-5 text-left flex items-start gap-2">
+              <Sparkles className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+              <span>{presenterNotice}</span>
+            </div>
+          )}
 
           {/* Auth Error Banner */}
           {authError && (

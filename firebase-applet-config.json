@@ -1,12 +1,9 @@
 {
-  "projectId": "gen-lang-client-0412270890",
-  "appId": "1:505381232914:web:94899da9fa3c4e030a13cb",
-  "apiKey": "AIzaSyAvU7vRqjf_pbfOWzF7QzJ0uKFseQvJB_g",
-  "authDomain": "gen-lang-client-0412270890.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-virlaguardiesdoc-0dad2c6a-3464-405f-bceb-d45de8c9c377",
-  "storageBucket": "gen-lang-client-0412270890.firebasestorage.app",
-  "messagingSenderId": "505381232914",
-  "measurementId": "",
-  "oAuthClientId": "505381232914-rbpuhov19c5gl62uhpr6qv0es0o5ujv0.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "apiKey": "AIzaSyCSTcV-lIpwBhJUHple57IHQzWmojATK5Q",
+  "authDomain": "virla-jogo.firebaseapp.com",
+  "projectId": "virla-jogo",
+  "storageBucket": "virla-jogo.firebasestorage.app",
+  "messagingSenderId": "960517017973",
+  "appId": "1:960517017973:web:3de0fee21de1104204033c",
+  "measurementId": "G-6Y5DFDTC4M"
 }

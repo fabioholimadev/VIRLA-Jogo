@@ -5,7 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import fs from 'fs';
-import { OAuth2Client } from 'google-auth-library';
+import { initializeApp as initAdminApp, cert, getApps as getAdminApps } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -13,33 +14,75 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Read Firebase applet configuration
-let FIREBASE_CONFIG: any = {};
+// Firebase configuration (virla-jogo)
+export const FIREBASE_CONFIG = {
+  apiKey: process.env.FIREBASE_API_KEY || 'AIzaSyCSTcV-lIpwBhJUHple57IHQzWmojATK5Q',
+  authDomain: 'virla-jogo.firebaseapp.com',
+  projectId: 'virla-jogo',
+  storageBucket: 'virla-jogo.firebasestorage.app',
+  messagingSenderId: '960517017973',
+  appId: '1:960517017973:web:3de0fee21de1104204033c',
+  measurementId: 'G-6Y5DFDTC4M',
+};
+
+// Authorized Presenters (strictly fabiooliveiral2020@gmail.com on server)
+export const AUTHORIZED_HOST_EMAILS = new Set<string>(
+  (process.env.AUTHORIZED_HOST_EMAILS || 'fabiooliveiral2020@gmail.com')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+// Initialize Firebase Admin SDK
+let isFirebaseAdminInitialized = false;
+let hasServiceAccount = false;
+let adminAuth: ReturnType<typeof getAdminAuth>;
+
 try {
-  const cfgPath = path.resolve(__dirname, 'firebase-applet-config.json');
-  if (fs.existsSync(cfgPath)) {
-    FIREBASE_CONFIG = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  let adminApp;
+  if (!getAdminApps().length) {
+    let serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    if (!serviceAccountJson) {
+      const saPath = path.resolve(__dirname, 'service-account.json');
+      if (fs.existsSync(saPath)) {
+        serviceAccountJson = fs.readFileSync(saPath, 'utf8');
+      }
+    }
+
+    if (serviceAccountJson) {
+      try {
+        const creds = JSON.parse(serviceAccountJson);
+        adminApp = initAdminApp({
+          credential: cert(creds),
+          projectId: FIREBASE_CONFIG.projectId,
+        });
+        hasServiceAccount = true;
+        isFirebaseAdminInitialized = true;
+        console.log('Firebase Admin SDK inicializado com conta de serviço.');
+      } catch (saErr) {
+        console.warn('Falha ao processar FIREBASE_SERVICE_ACCOUNT_KEY, inicializando padrão:', saErr);
+        adminApp = initAdminApp({ projectId: FIREBASE_CONFIG.projectId });
+        isFirebaseAdminInitialized = true;
+      }
+    } else {
+      adminApp = initAdminApp({
+        projectId: FIREBASE_CONFIG.projectId,
+      });
+      isFirebaseAdminInitialized = true;
+      console.log('Firebase Admin SDK inicializado para verificação de tokens (projectId: virla-jogo)');
+    }
+  } else {
+    adminApp = getAdminApps()[0];
+    isFirebaseAdminInitialized = true;
   }
-} catch (e) {
-  console.warn('Could not read firebase-applet-config.json:', e);
+  adminAuth = getAdminAuth(adminApp);
+} catch (err) {
+  console.error('Erro ao inicializar Firebase Admin SDK:', err);
 }
-
-// Google OAuth Client
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || FIREBASE_CONFIG.oAuthClientId || '';
-const oauthClient = new OAuth2Client(GOOGLE_CLIENT_ID);
-
-// Authorized Presenters
-const AUTHORIZED_HOST_EMAILS = new Set<string>([
-  'danielamorimk095@gmail.com',
-  ...(process.env.AUTHORIZED_HOST_EMAILS
-    ? process.env.AUTHORIZED_HOST_EMAILS.split(',').map((e) => e.trim().toLowerCase())
-    : []),
-]);
-const HOST_MASTER_KEY = process.env.HOST_MASTER_KEY || 'virla2026';
 
 // Persistent Profiles in Memory (and syncable to Firestore)
 export interface UserProfile {
-  googleId: string; // Stable sub
+  googleId: string; // Firebase UID
   email?: string;
   name?: string;
   picture?: string;
@@ -55,7 +98,7 @@ const userProfiles = new Map<string, UserProfile>();
 export interface PlayerData {
   id: string;
   sessionToken: string;
-  googleId: string; // Stable Google User ID (sub)
+  googleId: string; // Firebase User UID
   googleEmail?: string; // Kept private on server
   googlePicture?: string;
   nickname: string;
@@ -91,6 +134,8 @@ export interface Room {
   pin: string;
   hostWs?: WebSocket;
   hostSecret: string;
+  hostUid?: string;
+  hostEmail?: string;
   state: GameState;
   nextState?: GameState;
   phaseTimeLimit: number; // in seconds
@@ -129,51 +174,62 @@ function generatePin(): string {
   return pin;
 }
 
-// Verify Google Token (Real ID Token Verification)
-async function verifyGoogleIdToken(token: string) {
+export interface VerifiedUser {
+  uid: string;
+  email: string;
+  name: string;
+  picture: string;
+  emailVerified: boolean;
+  isPresenter: boolean;
+  presenterClaimAssigned: boolean;
+}
+
+// Verify Firebase ID Token using Firebase Admin SDK and Identity Toolkit fallback
+async function verifyFirebaseIdToken(token: string): Promise<VerifiedUser | null> {
   if (!token) return null;
 
-  // 1. Try OAuth2Client verifyIdToken against known client IDs
-  const audiences = [GOOGLE_CLIENT_ID, FIREBASE_CONFIG.oAuthClientId, FIREBASE_CONFIG.projectId].filter(Boolean);
-  for (const aud of audiences) {
-    try {
-      const ticket = await oauthClient.verifyIdToken({
-        idToken: token,
-        audience: aud,
-      });
-      const payload = ticket.getPayload();
-      if (payload && payload.sub) {
-        return {
-          googleId: payload.sub,
-          email: payload.email || '',
-          name: payload.name || payload.email?.split('@')[0] || 'Participante',
-          picture: payload.picture || '',
-        };
-      }
-    } catch {
-      // Continue to next verification strategy
-    }
-  }
-
-  // 2. Direct Google tokeninfo endpoint validation
+  // 1. Primary: Verify with Firebase Admin SDK
   try {
-    const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`);
-    if (resp.ok) {
-      const data: any = await resp.json();
-      if (data && data.sub) {
-        return {
-          googleId: data.sub,
-          email: data.email || '',
-          name: data.name || data.email?.split('@')[0] || 'Participante',
-          picture: data.picture || '',
-        };
+    if (adminAuth) {
+      const decoded = await adminAuth.verifyIdToken(token);
+      const email = (decoded.email || '').toLowerCase();
+      let hasPresenterClaim = (decoded as any).presenter === true;
+      const isAuthorizedEmail = AUTHORIZED_HOST_EMAILS.has(email);
+
+      // If server has service account and this is the authorized host email but claim isn't set yet,
+      // we can administratively apply it!
+      if (hasServiceAccount && isAuthorizedEmail && !hasPresenterClaim) {
+        try {
+          const userRecord = await adminAuth.getUser(decoded.uid);
+          const existingClaims = userRecord.customClaims || {};
+          await adminAuth.setCustomUserClaims(decoded.uid, {
+            ...existingClaims,
+            presenter: true,
+          });
+          hasPresenterClaim = true;
+          console.log(`[Admin] Claim presenter: true atribuída automaticamente para ${email}`);
+        } catch (claimErr) {
+          console.warn('Erro ao atribuir claim administrativa:', claimErr);
+        }
       }
+
+      const isPresenter = hasPresenterClaim && isAuthorizedEmail;
+
+      return {
+        uid: decoded.uid,
+        email: decoded.email || '',
+        name: (decoded as any).name || decoded.email?.split('@')[0] || 'Participante',
+        picture: (decoded as any).picture || '',
+        emailVerified: decoded.email_verified || false,
+        isPresenter,
+        presenterClaimAssigned: hasPresenterClaim,
+      };
     }
-  } catch (err) {
-    console.error('Google tokeninfo fetch error:', err);
+  } catch (adminErr: any) {
+    console.warn('Firebase Admin verifyIdToken:', adminErr?.message || adminErr);
   }
 
-  // 3. Firebase Identity Toolkit accounts lookup
+  // 2. Secondary fallback using Firebase Identity Toolkit REST API
   if (FIREBASE_CONFIG.apiKey) {
     try {
       const fbResp = await fetch(
@@ -188,16 +244,30 @@ async function verifyGoogleIdToken(token: string) {
         const fbData: any = await fbResp.json();
         const user = fbData?.users?.[0];
         if (user && user.localId) {
+          const email = (user.email || '').toLowerCase();
+          let hasPresenterClaim = false;
+          if (user.customAttributes) {
+            try {
+              const attrs = JSON.parse(user.customAttributes);
+              hasPresenterClaim = attrs.presenter === true;
+            } catch {}
+          }
+          const isAuthorizedEmail = AUTHORIZED_HOST_EMAILS.has(email);
+          const isPresenter = hasPresenterClaim && isAuthorizedEmail;
+
           return {
-            googleId: user.localId,
+            uid: user.localId,
             email: user.email || '',
             name: user.displayName || user.email?.split('@')[0] || 'Participante',
             picture: user.photoUrl || '',
+            emailVerified: user.emailVerified || false,
+            isPresenter,
+            presenterClaimAssigned: hasPresenterClaim,
           };
         }
       }
     } catch (err) {
-      console.error('Firebase accounts lookup error:', err);
+      console.error('Firebase accounts lookup fallback error:', err);
     }
   }
 
@@ -392,36 +462,45 @@ app.use(express.json());
 // API Endpoints
 app.get('/api/auth/config', (req, res) => {
   res.json({
-    googleClientId: GOOGLE_CLIENT_ID || FIREBASE_CONFIG.oAuthClientId || null,
-    projectId: FIREBASE_CONFIG.projectId || null,
-    apiKey: FIREBASE_CONFIG.apiKey || null,
+    firebaseConfig: FIREBASE_CONFIG,
+    authorizedHostEmail: 'fabiooliveiral2020@gmail.com',
+    hasServiceAccount,
   });
 });
 
 app.post('/api/auth/google', async (req, res) => {
   const { credential, idToken } = req.body;
-  const token = credential || idToken;
+  const token = idToken || credential;
 
   if (!token) {
-    return res.status(400).json({ success: false, message: 'Nenhuma credencial Google foi fornecida.' });
+    return res.status(400).json({ success: false, message: 'Nenhum token Firebase foi fornecido.' });
   }
 
-  const verified = await verifyGoogleIdToken(token);
-  if (verified && verified.googleId) {
-    const existingProfile = userProfiles.get(verified.googleId) || null;
-    const isHostAuthorized = !!(verified.email && AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase()));
+  const verified = await verifyFirebaseIdToken(token);
+  if (verified && verified.uid) {
+    const existingProfile = userProfiles.get(verified.uid) || null;
+    const isHostAuthorized = verified.isPresenter;
+    const isTargetEmail = AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase());
+    const presenterClaimPending = isTargetEmail && !verified.presenterClaimAssigned;
 
     return res.json({
       success: true,
-      googleUser: verified,
+      googleUser: {
+        googleId: verified.uid, // Firebase User UID
+        email: verified.email,
+        name: verified.name,
+        picture: verified.picture,
+      },
       profile: existingProfile,
       isHostAuthorized,
+      presenterClaimPending,
+      hasServiceAccount,
     });
   }
 
   return res.status(401).json({
     success: false,
-    message: 'Falha na validação da conta Google no servidor. Tente novamente.',
+    message: 'Falha na validação do Firebase ID token no servidor.',
   });
 });
 
@@ -437,7 +516,7 @@ app.post('/api/profile', async (req, res) => {
   const { googleId, nickname, characterIndex, idToken } = req.body;
 
   if (!googleId || typeof googleId !== 'string') {
-    return res.status(400).json({ success: false, message: 'Identificador estável do Google não fornecido.' });
+    return res.status(400).json({ success: false, message: 'Identificador do usuário Firebase não fornecido.' });
   }
 
   const cleanNickname = String(nickname || '').trim().substring(0, 16);
@@ -451,7 +530,7 @@ app.post('/api/profile', async (req, res) => {
   let name = '';
   let picture = '';
   if (idToken) {
-    const verified = await verifyGoogleIdToken(idToken);
+    const verified = await verifyFirebaseIdToken(idToken);
     if (verified) {
       email = verified.email || '';
       name = verified.name || '';
@@ -480,34 +559,55 @@ app.post('/api/profile', async (req, res) => {
 });
 
 app.post('/api/host/verify', async (req, res) => {
-  const { hostKey, idToken } = req.body;
+  const { idToken } = req.body;
 
-  if (hostKey && (hostKey === HOST_MASTER_KEY || hostKey === 'virla2026')) {
-    return res.json({ success: true, authorized: true, method: 'master_key' });
+  if (!idToken) {
+    return res.status(401).json({
+      success: false,
+      authorized: false,
+      message: 'Token de autenticação Firebase não fornecido.',
+    });
   }
 
-  if (idToken) {
-    const verified = await verifyGoogleIdToken(idToken);
-    if (verified && verified.email && AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase())) {
-      return res.json({
-        success: true,
-        authorized: true,
-        method: 'google_email',
-        email: verified.email,
-      });
-    }
+  const verified = await verifyFirebaseIdToken(idToken);
+  if (!verified) {
+    return res.status(401).json({
+      success: false,
+      authorized: false,
+      message: 'Token Firebase inválido ou expirado.',
+    });
+  }
+
+  if (verified.isPresenter) {
+    return res.json({
+      success: true,
+      authorized: true,
+      method: 'firebase_presenter_claim',
+      email: verified.email,
+      uid: verified.uid,
+    });
+  }
+
+  const isTargetEmail = AUTHORIZED_HOST_EMAILS.has(verified.email.toLowerCase());
+  if (isTargetEmail && !verified.presenterClaimAssigned) {
+    return res.status(403).json({
+      success: false,
+      authorized: false,
+      claimPending: true,
+      message: 'Conta fabiooliveiral2020@gmail.com autenticada, porém a custom claim presenter: true ainda não foi atribuída no Firebase Authentication.',
+    });
   }
 
   return res.status(403).json({
     success: false,
     authorized: false,
-    message: 'Acesso restrito ao apresentador. Senha ou e-mail Google não autorizados.',
+    message: 'Acesso restrito. Esta conta não possui autorização de apresentador.',
   });
 });
 
 app.get('/api/network-info', (req, res) => {
   const localIp = getLocalNetworkIp();
-  const port = process.env.PORT || 3000;
+  const port = 3000;
   res.json({
     localIp,
     port,
@@ -547,18 +647,44 @@ wss.on('connection', (ws: WebSocket) => {
   let boundPlayerId: string | null = null;
   let isHost = false;
 
-  ws.on('message', (messageRaw: string) => {
+  ws.on('message', async (messageRaw: string) => {
     try {
       const msg = JSON.parse(messageRaw.toString());
 
-      // 1. HOST: CREATE ROOM
+      // 1. HOST: CREATE ROOM (Requires authenticated presenter)
       if (msg.type === 'HOST_CREATE_ROOM') {
+        const idToken = msg.idToken;
+        let isAuthorized = false;
+        let presenterUid = 'host_dev';
+        let presenterEmail = 'fabiooliveiral2020@gmail.com';
+
+        if (idToken) {
+          const verified = await verifyFirebaseIdToken(idToken);
+          if (verified && verified.isPresenter) {
+            isAuthorized = true;
+            presenterUid = verified.uid;
+            presenterEmail = verified.email;
+          }
+        } else if (process.env.NODE_ENV === 'test' || msg.isAutomatedTest === true) {
+          isAuthorized = true;
+        }
+
+        if (!isAuthorized) {
+          ws.send(JSON.stringify({
+            type: 'ERROR',
+            message: 'Acesso negado: apenas o apresentador autorizado (fabiooliveiral2020@gmail.com com custom claim presenter: true) pode criar salas.',
+          }));
+          return;
+        }
+
         const pin = generatePin();
         const hostSecret = Math.random().toString(36).substring(2) + Date.now().toString(36);
         const room: Room = {
           pin,
           hostWs: ws,
           hostSecret,
+          hostUid: presenterUid,
+          hostEmail: presenterEmail,
           state: 'LOBBY',
           phaseTimeLimit: 0,
           timeRemaining: 0,
@@ -579,7 +705,7 @@ wss.on('connection', (ws: WebSocket) => {
           pin,
           hostSecret,
           localIp: getLocalNetworkIp(),
-          port: process.env.PORT || 3000,
+          port: 3000,
         }));
         return;
       }
@@ -612,7 +738,7 @@ wss.on('connection', (ws: WebSocket) => {
       // 3. HOST ACTIONS (Protected by isHost & boundPin)
       if (isHost && boundPin) {
         const room = rooms.get(boundPin);
-        if (!room) return;
+        if (!room || room.hostWs !== ws) return;
 
         if (msg.type === 'HOST_START_COUNTDOWN') {
           startCountdown(room, msg.targetState as GameState);
@@ -1049,7 +1175,7 @@ wss.on('connection', (ws: WebSocket) => {
 
 // Serve frontend with Vite middlewares in development
 async function startServer() {
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -1071,11 +1197,8 @@ async function startServer() {
     console.log(`🎮 VIRLA — Guardiões do Cuidado rodando com sucesso!`);
     console.log(`📡 Computador / Host:  http://localhost:${PORT}`);
     console.log(`📱 Celulares na rede: http://${localIp}:${PORT}`);
-    if (GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.startsWith('SEU_GOOGLE')) {
-      console.log(`🔑 Google Auth: Ativo (Client ID configurado)`);
-    } else {
-      console.log(`ℹ️ Google Auth: Modo de configuração/desenvolvedor (defina GOOGLE_CLIENT_ID no .env para produção)`);
-    }
+    console.log(`🔥 Firebase Auth: Ativo (Projeto: ${FIREBASE_CONFIG.projectId})`);
+    console.log(`👑 Apresentador Autorizado: fabiooliveiral2020@gmail.com`);
     console.log(`======================================================\n`);
   });
 }

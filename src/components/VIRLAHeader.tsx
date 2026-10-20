@@ -1,13 +1,13 @@
 import React from 'react';
-import { Volume2, VolumeX, Shield, Heart, ShieldAlert, Monitor } from 'lucide-react';
-import { sound } from '../game/audio';
+import { Volume2, VolumeX, Heart, Monitor } from 'lucide-react';
 
 interface VIRLAHeaderProps {
   isMuted: boolean;
   onToggleMute: () => void;
   mode?: 'host' | 'player';
   onExitHost?: () => void;
-  onRequestHostAccess?: () => void;
+  isHostAuthorized?: boolean;
+  onOpenHost?: () => void;
 }
 
 export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
@@ -15,7 +15,8 @@ export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
   onToggleMute,
   mode = 'player',
   onExitHost,
-  onRequestHostAccess,
+  isHostAuthorized = false,
+  onOpenHost,
 }) => {
   return (
     <header className="w-full bg-[#6B0075]/95 backdrop-blur-md border-b border-[#FE91FE]/30 px-3 sm:px-4 py-2 flex items-center justify-between text-white z-50 shrink-0">
@@ -49,7 +50,7 @@ export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
             {onExitHost && (
               <button
                 onClick={onExitHost}
-                className="text-[10px] bg-amber-400 text-amber-950 font-bold px-2 py-0.5 rounded hover:bg-amber-300 transition ml-1"
+                className="text-[10px] bg-amber-400 text-amber-950 font-bold px-2 py-0.5 rounded hover:bg-amber-300 transition ml-1 cursor-pointer"
               >
                 Voltar
               </button>
@@ -57,11 +58,23 @@ export const VIRLAHeader: React.FC<VIRLAHeaderProps> = ({
           </div>
         )}
 
+        {/* If in Player mode and authorized as presenter, allow switching to host */}
+        {mode === 'player' && isHostAuthorized && onOpenHost && (
+          <button
+            onClick={onOpenHost}
+            className="flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/60 text-amber-200 px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer"
+            title="Alternar para o Painel do Apresentador"
+          >
+            <Monitor className="w-3.5 h-3.5 text-amber-300" />
+            <span>Telão</span>
+          </button>
+        )}
+
         {/* Audio Mute Toggle */}
         <button
           onClick={onToggleMute}
           title={isMuted ? 'Ativar Som' : 'Silenciar'}
-          className="p-2 rounded-lg bg-[#83078E] hover:bg-[#83078E]/80 border border-[#FE91FE]/40 text-[#FE91FE] transition shadow flex items-center justify-center shrink-0"
+          className="p-2 rounded-lg bg-[#83078E] hover:bg-[#83078E]/80 border border-[#FE91FE]/40 text-[#FE91FE] transition shadow flex items-center justify-center shrink-0 cursor-pointer"
         >
           {isMuted ? <VolumeX className="w-4 h-4 sm:w-5 sm:h-5 text-pink-300" /> : <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-[#FE91FE]" />}
         </button>

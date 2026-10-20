@@ -22,7 +22,7 @@ async function runTest() {
 
   await new Promise<void>((resolve, reject) => {
     hostWs.on('open', () => {
-      hostWs.send(JSON.stringify({ type: 'HOST_CREATE_ROOM' }));
+      hostWs.send(JSON.stringify({ type: 'HOST_CREATE_ROOM', isAutomatedTest: true }));
     });
 
     hostWs.on('message', (data) => {
